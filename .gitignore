@@ -8,6 +8,9 @@ dist/
 deploy/env.sh
 deploy/outputs.env
 
+# Vite temporales
+*.timestamp-*.mjs
+
 # Sistema
 .DS_Store
 *.zip

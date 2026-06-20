@@ -95,19 +95,27 @@ def create_upload(event):
     rubrica = (body.get("rubrica") or "").strip()
     key = f"inputs/{job_id}/submissions.csv"
 
-    params = {"Bucket": BUCKET, "Key": key, "ContentType": "text/csv"}
-    # headers que el cliente DEBE enviar al hacer el PUT (deben calzar con la firma)
-    headers = {"Content-Type": "text/csv"}
-    if rubrica:
-        params["Metadata"] = {"rubrica": rubrica}
-        headers["x-amz-meta-rubrica"] = rubrica
+    # Guardamos la rubrica en DynamoDB (NO en metadata de S3). Asi soporta texto
+    # largo, con acentos y saltos de linea sin romper la firma del presigned URL
+    # ni los limites de los headers HTTP.
+    now = datetime.now(timezone.utc).isoformat()
+    table.put_item(Item={
+        "PK": f"JOB#{job_id}",
+        "SK": "META",
+        "status": "PENDING_UPLOAD",
+        "rubrica": rubrica,
+        "createdAt": now,
+        "updatedAt": now,
+    })
 
+    # Presigned URL simple: solo Content-Type, sin metadata.
+    params = {"Bucket": BUCKET, "Key": key, "ContentType": "text/csv"}
     url = s3.generate_presigned_url("put_object", Params=params, ExpiresIn=URL_EXPIRES)
     return _resp(200, {
         "jobId": job_id,
         "uploadUrl": url,
         "method": "PUT",
-        "headers": headers,  # el frontend replica estos headers en el PUT
+        "headers": {"Content-Type": "text/csv"},  # el frontend replica esto en el PUT
         "key": key,
     })
 

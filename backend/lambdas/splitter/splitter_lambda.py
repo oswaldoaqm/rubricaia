@@ -75,14 +75,23 @@ def handler(event, context):
         job_id = extract_job_id(key)
 
         obj = s3.get_object(Bucket=bucket, Key=key)
-        rubrica = obj.get("Metadata", {}).get("rubrica") or DEFAULT_RUBRICA
         # utf-8-sig por si el CSV viene de Excel con BOM
         text = obj["Body"].read().decode("utf-8-sig")
+
+        # La rubrica la fija la API en el item META (camino normal del frontend).
+        # Fallback: metadata de S3 (prueba por CLI) o la rubrica por defecto.
+        existing = table.get_item(Key={"PK": f"JOB#{job_id}", "SK": "META"}).get("Item") or {}
+        rubrica = (
+            existing.get("rubrica")
+            or obj.get("Metadata", {}).get("rubrica")
+            or DEFAULT_RUBRICA
+        )
+        created = existing.get("createdAt") or now_iso()
 
         reader = csv.DictReader(io.StringIO(text))
         rows = [r for r in reader if (r.get("id_estudiante") or "").strip()]
 
-        # 1) Registro META del job
+        # 1) Registro/actualizacion del META del job (preserva createdAt)
         table.put_item(
             Item={
                 "PK": f"JOB#{job_id}",
@@ -90,7 +99,7 @@ def handler(event, context):
                 "status": "PROCESSING",
                 "total": len(rows),
                 "rubrica": rubrica,
-                "createdAt": now_iso(),
+                "createdAt": created,
                 "updatedAt": now_iso(),
             }
         )
