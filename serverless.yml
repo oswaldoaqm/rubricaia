@@ -2,8 +2,8 @@
 # RúbricaIA - Infraestructura como Código (Serverless Framework v4)
 # -----------------------------------------------------------------------------
 # Reemplaza los scripts deploy/*.sh: UNA sola fuente declarativa de toda la
-# arquitectura: S3, SQS+DLQ, DynamoDB (Streams), EventBridge, SNS, API Gateway
-# y 5 Lambdas (splitter, worker, api, aggregator, report).
+# arquitectura: S3, SQS+DLQ, DynamoDB x2 (una con Streams), EventBridge, SNS,
+# API Gateway y 7 Lambdas (auth, lms, api, splitter, worker, aggregator, report).
 #
 # >>> CLAVE PARA AWS LEARNER LAB <<<
 #   - provider.iam.role pinea el LabRole existente. Learner Lab NO permite crear
@@ -39,7 +39,7 @@ provider:
   httpApi:
     cors: true
 
-  # --- Variables de entorno compartidas por las 3 Lambdas ---------------------
+  # --- Variables de entorno compartidas por las Lambdas -----------------------
   environment:
     TABLE_NAME: ${self:service}-${sls:stage}
     QUEUE_URL: !Ref JobsQueue

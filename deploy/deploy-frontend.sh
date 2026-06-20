@@ -4,20 +4,18 @@
 #
 # Compila la app React con la API_URL del backend y la publica en Amplify.
 # Uso:
+#   echo "API_URL=<endpoint de 'serverless info'>" > deploy/outputs.env
 #   source deploy/env.sh
 #   bash deploy/deploy-frontend.sh
-#
-# Si Amplify esta restringido en tu Learner Lab, usa el plan B:
-#   bash deploy/deploy-frontend-s3.sh
 ###############################################################################
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-# API_URL viene de outputs.env (lo genero deploy.sh)
+# API_URL viene de outputs.env (lo creas con el endpoint de 'serverless info')
 source "${ROOT}/deploy/outputs.env"
-: "${API_URL:?No encuentro API_URL. Corre primero deploy.sh}"
+: "${API_URL:?No encuentro API_URL. Crea deploy/outputs.env con API_URL=<endpoint de 'serverless info'>}"
 
 APP_NAME="rubricaia-frontend"
 BRANCH="main"

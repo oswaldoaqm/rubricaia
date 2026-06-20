@@ -136,21 +136,7 @@ input[type="file"] { padding: 8px; background: var(--panel2); cursor: pointer; }
 .rubricbox .ilabel { font-weight: 500; margin-bottom: 8px; color: var(--muted); }
 .rubricpre { margin: 0; white-space: pre-wrap; font-family: inherit; font-size: 14px; line-height: 1.6; color: var(--text); }
 
-/* --- Dashboard --- */
-.dashhead { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
-.notified { display: inline-block; margin-left: 8px; vertical-align: middle; font-size: 12px; font-weight: 500; color: var(--good); background: var(--good-soft); border: 1px solid #cadccf; border-radius: 999px; padding: 3px 10px; font-family: var(--sans); }
-.progress { margin: 16px 0; }
-.progressbar { height: 9px; background: var(--panel2); border-radius: 999px; overflow: hidden; margin-bottom: 8px; }
-.progressbar span { display: block; height: 100%; background: var(--primary); border-radius: 999px; transition: width 0.4s; }
-.progressbar span.live { background: repeating-linear-gradient(45deg, var(--primary), var(--primary) 8px, var(--primary-d) 8px, var(--primary-d) 16px); }
-
-.reportbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 16px 0 4px; padding: 13px 15px; background: var(--panel2); border: 1px solid var(--border); border-radius: 12px; }
-.reportlabel { font-weight: 500; }
-.reportbtns { display: flex; gap: 8px; }
-.retrybar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 14px 0 4px; padding: 13px 15px; background: var(--bad-soft); border: 1px solid #e3c8c2; border-radius: 12px; font-size: 14px; }
-.similalert { margin: 14px 0 4px; padding: 13px 15px; background: var(--mid-soft); border: 1px solid #e6d3a8; border-radius: 12px; font-size: 14px; }
-
-/* --- Insights --- */
+/* --- Insights (panel del profesor) --- */
 .insights { margin: 18px 0; }
 .insightcards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
 .icard { background: var(--panel2); border-radius: 12px; padding: 16px; }
