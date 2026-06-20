@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1170 540" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#6f6557"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1170" height="540" fill="#faf7f0"/>
+  <text x="24" y="34" font-size="19" font-weight="600" fill="#221d15">RúbricaIA — Arquitectura</text>
+  <text x="24" y="54" font-size="12.5" fill="#6f6557">Plano de control síncrono (gestión multi-tenant) + plano de datos event-driven y asíncrono (evaluación con LLM)</text>
+
+  <!-- Bandas -->
+  <rect x="12" y="72" width="1146" height="132" rx="12" fill="#eef2f7" stroke="#d4dde8"/>
+  <text x="28" y="92" font-size="12.5" font-weight="600" fill="#3a4a5e">PLANO DE CONTROL · síncrono</text>
+  <rect x="12" y="246" width="1146" height="262" rx="12" fill="#eef3ee" stroke="#cfe0d3"/>
+  <text x="28" y="266" font-size="12.5" font-weight="600" fill="#1f4d3a">PLANO DE DATOS · event-driven, asíncrono</text>
+
+  <!-- ===== Control plane ===== -->
+  <!-- Frontend -->
+  <rect x="30" y="107" width="160" height="46" rx="8" fill="#fff" stroke="#5f5e5a" stroke-width="1.4"/>
+  <text x="110" y="127" text-anchor="middle" font-size="12.5" font-weight="600" fill="#221d15">Frontend</text>
+  <text x="110" y="142" text-anchor="middle" font-size="10" fill="#6f6557">React · Vite · Amplify</text>
+  <!-- API Gateway -->
+  <rect x="220" y="107" width="160" height="46" rx="8" fill="#fff" stroke="#534ab7" stroke-width="1.4"/>
+  <text x="300" y="127" text-anchor="middle" font-size="12.5" font-weight="600" fill="#221d15">API Gateway</text>
+  <text x="300" y="142" text-anchor="middle" font-size="10" fill="#6f6557">HTTP API</text>
+  <!-- Auth -->
+  <rect x="410" y="84" width="160" height="44" rx="8" fill="#fff" stroke="#1f4d3a" stroke-width="1.5"/>
+  <text x="490" y="103" text-anchor="middle" font-size="12.5" font-weight="600" fill="#221d15">Auth λ</text>
+  <text x="490" y="118" text-anchor="middle" font-size="10" fill="#6f6557">JWT · dominio @utec</text>
+  <!-- LMS -->
+  <rect x="410" y="133" width="160" height="44" rx="8" fill="#fff" stroke="#1f4d3a" stroke-width="1.5"/>
+  <text x="490" y="152" text-anchor="middle" font-size="12.5" font-weight="600" fill="#221d15">LMS λ</text>
+  <text x="490" y="167" text-anchor="middle" font-size="10" fill="#6f6557">clases · tareas · roster</text>
+  <!-- Dynamo LMS -->
+  <rect x="620" y="107" width="170" height="46" rx="8" fill="#fff" stroke="#9a6a1a" stroke-width="1.4"/>
+  <text x="705" y="127" text-anchor="middle" font-size="12.5" font-weight="600" fill="#221d15">DynamoDB · LMS</text>
+  <text x="705" y="142" text-anchor="middle" font-size="10" fill="#6f6557">usuarios · clases · tareas</text>
+
+  <line x1="190" y1="130" x2="216" y2="130" stroke="#6f6557" stroke-width="1.4" marker-end="url(#arr)"/>
+  <line x1="380" y1="124" x2="406" y2="106" stroke="#6f6557" stroke-width="1.4" marker-end="url(#arr)"/>
+  <line x1="380" y1="136" x2="406" y2="155" stroke="#6f6557" stroke-width="1.4" marker-end="url(#arr)"/>
+  <text x="392" y="100" font-size="9.5" fill="#534ab7">JWT</text>
+  <line x1="570" y1="106" x2="618" y2="125" stroke="#6f6557" stroke-width="1.4" marker-end="url(#arr)"/>
+  <line x1="570" y1="155" x2="618" y2="136" stroke="#6f6557" stroke-width="1.4" marker-end="url(#arr)"/>
+
+  <!-- Cross: Frontend -> API λ (data plane) -->
+  <line x1="110" y1="153" x2="110" y2="300" stroke="#1f4d3a" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arr)"/>
+  <text x="118" y="232" font-size="10" fill="#1f4d3a">sube entregable</text>
+  <text x="118" y="246" font-size="10" fill="#1f4d3a">POST /uploads</text>
+
+  <!-- ===== Data plane row 1 ===== -->
+  <rect x="30" y="300" width="160" height="46" rx="8" fill="#fff" stroke="#1f4d3a" stroke-width="1.5"/>
+  <text x="110" y="320" text-anchor="middle" font-size="12.5" font-weight="600" fill="#221d15">API λ</text>
+  <text x="110" y="335" text-anchor="middle" font-size="10" fill="#6f6557">presigned URL</text>
+
+  <rect x="220" y="300" width="160" height="46" rx="8" fill="#fff" stroke="#9a6a1a" stroke-width="1.4"/>
+  <text x="300" y="320" text-anchor="middle" font-size="12.5" font-weight="600" fill="#221d15">S3</text>
+  <text x="300" y="335" text-anchor="middle" font-size="10" fill="#6f6557">inputs/</text>
+
+  <rect x="410" y="300" width="160" height="46" rx="8" fill="#fff" stroke="#1f4d3a" stroke-width="1.5"/>
+  <text x="490" y="320" text-anchor="middle" font-size="12.5" font-weight="600" fill="#221d15">Splitter λ</text>
+  <text x="490" y="335" text-anchor="middle" font-size="10" fill="#6f6557">CSV → N eventos</text>
+
+  <rect x="600" y="300" width="160" height="46" rx="8" fill="#fff" stroke="#9a6a1a" stroke-width="1.4"/>
+  <text x="680" y="320" text-anchor="middle" font-size="12.5" font-weight="600" fill="#221d15">SQS · jobs</text>
+  <text x="680" y="335" text-anchor="middle" font-size="10" fill="#6f6557">+ DLQ</text>
+
+  <rect x="790" y="300" width="160" height="46" rx="8" fill="#fff" stroke="#1f4d3a" stroke-width="1.5"/>
+  <text x="870" y="320" text-anchor="middle" font-size="12.5" font-weight="600" fill="#221d15">Worker λ</text>
+  <text x="870" y="335" text-anchor="middle" font-size="10" fill="#6f6557">evalúa · reintenta</text>
+
+  <rect x="980" y="300" width="160" height="46" rx="8" fill="#fff" stroke="#7a2e2e" stroke-width="1.4"/>
+  <text x="1060" y="320" text-anchor="middle" font-size="12.5" font-weight="600" fill="#221d15">Groq</text>
+  <text x="1060" y="335" text-anchor="middle" font-size="10" fill="#6f6557">API LLM</text>
+
+  <line x1="190" y1="323" x2="216" y2="323" stroke="#6f6557" stroke-width="1.4" marker-end="url(#arr)"/>
+  <line x1="380" y1="323" x2="406" y2="323" stroke="#6f6557" stroke-width="1.4" marker-end="url(#arr)"/>
+  <text x="393" y="294" font-size="9.5" fill="#6f6557">ObjectCreated</text>
+  <line x1="570" y1="323" x2="596" y2="323" stroke="#6f6557" stroke-width="1.4" marker-end="url(#arr)"/>
+  <text x="583" y="294" font-size="9.5" fill="#6f6557">1 msg/entregable</text>
+  <line x1="760" y1="323" x2="786" y2="323" stroke="#6f6557" stroke-width="1.4" marker-end="url(#arr)"/>
+  <line x1="950" y1="318" x2="976" y2="318" stroke="#6f6557" stroke-width="1.4" marker-end="url(#arr)"/>
+  <line x1="976" y1="330" x2="950" y2="330" stroke="#6f6557" stroke-width="1.4" marker-end="url(#arr)"/>
+
+  <!-- ===== Data plane row 2 ===== -->
+  <rect x="790" y="400" width="160" height="46" rx="8" fill="#fff" stroke="#9a6a1a" stroke-width="1.4"/>
+  <text x="870" y="420" text-anchor="middle" font-size="12.5" font-weight="600" fill="#221d15">DynamoDB · jobs</text>
+  <text x="870" y="435" text-anchor="middle" font-size="10" fill="#6f6557">estado · resultado</text>
+
+  <rect x="600" y="400" width="160" height="46" rx="8" fill="#fff" stroke="#1f4d3a" stroke-width="1.5"/>
+  <text x="680" y="420" text-anchor="middle" font-size="12.5" font-weight="600" fill="#221d15">Aggregator λ</text>
+  <text x="680" y="435" text-anchor="middle" font-size="10" fill="#6f6557">STATS en vivo</text>
+
+  <rect x="410" y="400" width="160" height="46" rx="8" fill="#fff" stroke="#534ab7" stroke-width="1.4"/>
+  <text x="490" y="420" text-anchor="middle" font-size="12.5" font-weight="600" fill="#221d15">EventBridge</text>
+  <text x="490" y="435" text-anchor="middle" font-size="10" fill="#6f6557">JobCompleted</text>
+
+  <rect x="220" y="375" width="160" height="42" rx="8" fill="#fff" stroke="#534ab7" stroke-width="1.4"/>
+  <text x="300" y="392" text-anchor="middle" font-size="12.5" font-weight="600" fill="#221d15">SNS</text>
+  <text x="300" y="407" text-anchor="middle" font-size="10" fill="#6f6557">email al docente</text>
+
+  <rect x="220" y="429" width="160" height="42" rx="8" fill="#fff" stroke="#1f4d3a" stroke-width="1.5"/>
+  <text x="300" y="446" text-anchor="middle" font-size="12.5" font-weight="600" fill="#221d15">Report λ</text>
+  <text x="300" y="461" text-anchor="middle" font-size="10" fill="#6f6557">CSV · JSON · HTML</text>
+
+  <rect x="30" y="429" width="160" height="42" rx="8" fill="#fff" stroke="#9a6a1a" stroke-width="1.4"/>
+  <text x="110" y="446" text-anchor="middle" font-size="12.5" font-weight="600" fill="#221d15">S3</text>
+  <text x="110" y="461" text-anchor="middle" font-size="10" fill="#6f6557">reports/</text>
+
+  <line x1="870" y1="346" x2="870" y2="396" stroke="#6f6557" stroke-width="1.4" marker-end="url(#arr)"/>
+  <line x1="790" y1="423" x2="764" y2="423" stroke="#6f6557" stroke-width="1.4" marker-end="url(#arr)"/>
+  <text x="773" y="394" font-size="9.5" fill="#6f6557" text-anchor="middle">Streams</text>
+  <line x1="600" y1="423" x2="574" y2="423" stroke="#6f6557" stroke-width="1.4" marker-end="url(#arr)"/>
+  <line x1="410" y1="414" x2="384" y2="400" stroke="#6f6557" stroke-width="1.4" marker-end="url(#arr)"/>
+  <line x1="410" y1="432" x2="384" y2="446" stroke="#6f6557" stroke-width="1.4" marker-end="url(#arr)"/>
+  <line x1="220" y1="450" x2="194" y2="450" stroke="#6f6557" stroke-width="1.4" marker-end="url(#arr)"/>
+
+  <text x="28" y="498" font-size="10.5" fill="#6f6557">Resiliencia (criterio 3): lotes de 20–30 · reintentos por SQS con backoff y Retry-After · DLQ · idempotencia · reserved concurrency anti rate-limit</text>
+</svg>

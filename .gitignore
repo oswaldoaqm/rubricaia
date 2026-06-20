@@ -8,6 +8,9 @@ dist/
 deploy/env.sh
 deploy/outputs.env
 
+# Serverless Framework
+.serverless/
+
 # Vite temporales
 *.timestamp-*.mjs
 

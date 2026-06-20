@@ -1,198 +1,144 @@
-# Manual de Despliegue — RúbricaIA (Backend + API)
+# Manual de despliegue — RúbricaIA
 
-Backend 100% serverless en **AWS Learner Lab** con **LabRole**. Sin Docker, sin VM,
-sin roles IAM custom. Compatible con el Worker y el Splitter ya creados.
+Despliegue 100% **serverless** con **Serverless Framework v4** sobre AWS (probado en
+**AWS Academy Learner Lab** con `LabRole`). Una sola fuente de infraestructura:
+[`../serverless.yml`](../serverless.yml). No hay Docker ni máquinas virtuales.
 
----
-
-## 0. Arquitectura de infraestructura
-
-```
-                         ┌────────────────────────────────────────────┐
-   (frontend, luego)     │                  AWS                        │
-        │                │                                            │
-        │  POST /uploads │   ┌──────────────┐                         │
-        ├───────────────────▶│  API Gateway │──▶ rubricaia-api (λ)    │
-        │  GET /jobs(/id)│   │   HTTP API   │      │   │   │           │
-        │◀───────────────────┤  ($default)  │      │   │   └─▶ S3 presigned URL
-        │                │   └──────────────┘      │   └─────▶ DynamoDB (lectura)
-        ▼                │                          ▼                  │
-   sube CSV  ─PUT─────────────────────────────▶  S3  inputs/<jobId>/submissions.csv
-                         │                          │ (ObjectCreated)  │
-                         │                          ▼                  │
-                         │                  rubricaia-splitter (λ)     │
-                         │                    │            │           │
-                         │       1 item PENDING│            │ 1 msg/fila│
-                         │                     ▼            ▼           │
-                         │                 DynamoDB      SQS rubricaia-jobs
-                         │                 (rubricaia)       │          │
-                         │                     ▲             ▼          │
-                         │           estado/result│   rubricaia-worker (λ)
-                         │                        └────────┤  └─▶ Groq API
-                         │                                 │ (429/err)  │
-                         │                                 ▼            │
-                         │                          SQS rubricaia-dlq   │
-                         └────────────────────────────────────────────┘
-```
-
-Componentes y por qué cada uno (sin sobra):
-- **S3** `rubricaia-inputs-<acct>`: recibe el CSV y dispara el flujo (evento `ObjectCreated`).
-- **Splitter (λ)**: parte el CSV en N eventos SQS + crea items `PENDING`.
-- **SQS `rubricaia-jobs` + DLQ `rubricaia-dlq`**: bus de eventos + reintentos sin pérdida.
-- **Worker (λ)**: llama a Groq, guarda resultado/estado. Reserved concurrency = 3 (anti rate-limit).
-- **DynamoDB `rubricaia`**: estado y resultados por entregable.
-- **API (λ) + API Gateway HTTP API**: presigned URL + lectura para el frontend.
-- **LabRole**: rol de ejecución de las 3 Lambdas (Learner Lab no permite crear roles).
+Diagrama de arquitectura: [`arquitectura.svg`](arquitectura.svg).
 
 ---
 
-## 1. Estructura exacta del proyecto
+## 1. Requisitos
 
-```
-rubricaia/                      (monorepo)
-├── README.md
-├── docs/
-│   ├── contrato-datos.md        # formatos input/output + esquema DynamoDB
-│   └── manual-despliegue.md     # este archivo
-├── deploy/
-│   ├── env.example.sh           # plantilla de variables (copiar a env.sh)
-│   ├── deploy.sh                # despliegue completo con AWS CLI
-│   ├── teardown.sh              # borrar todo
-│   └── outputs.env              # (lo genera deploy.sh: BUCKET, API_URL, etc.)
-├── backend/
-│   └── lambdas/
-│       ├── splitter/splitter_lambda.py   # handler: splitter_lambda.handler
-│       ├── worker/worker_lambda.py        # handler: worker_lambda.handler
-│       └── api/api_lambda.py              # handler: api_lambda.handler
-├── samples/
-│   └── submissions.csv          # datos de prueba
-└── frontend/                    # (vacío por ahora — siguiente bloque)
-```
+- `aws` CLI configurado (credenciales del Learner Lab en `~/.aws/credentials`).
+- **Serverless Framework v4**, **Node 18+**, **Python 3.12**, `zip`.
+- **GROQ_API_KEY** (https://console.groq.com/keys).
+- **SERVERLESS_ACCESS_KEY** (https://app.serverless.com → Access Keys) — v4 exige
+  autenticación y la VM es headless (no usar `serverless login`).
 
-### Variables de entorno por Lambda
-
-| Lambda | Variable | Valor |
-|---|---|---|
-| splitter | `TABLE_NAME` | `rubricaia` |
-| splitter | `QUEUE_URL` | URL de la cola principal |
-| splitter | `DEFAULT_RUBRICA` | rúbrica por defecto (texto) |
-| worker | `TABLE_NAME` | `rubricaia` |
-| worker | `GROQ_API_KEY` | tu key `gsk_...` |
-| worker | `GROQ_MODEL` | `llama-3.3-70b-versatile` |
-| worker | `MAX_ATTEMPTS` | `3` |
-| api | `TABLE_NAME` | `rubricaia` |
-| api | `BUCKET` | `rubricaia-inputs-<acct>` |
-| api | `URL_EXPIRES` | `300` |
-
-### Dependencias
-Ninguna externa. Solo **stdlib de Python + boto3** (ya incluido en el runtime Lambda).
-Cada Lambda se empaqueta como un `.zip` con un único `.py`. Groq se llama con `urllib`.
-
----
-
-## 2. Orden exacto de despliegue
-
-> El script `deploy.sh` ya hace todo esto en el orden correcto. Esta es la lógica.
-
-1. **S3** (bucket + CORS) — primero, porque es el origen del flujo.
-2. **DynamoDB** — antes que las Lambdas, que la usan al ejecutar.
-3. **SQS DLQ**, luego **cola principal** con RedrivePolicy apuntando a la DLQ.
-4. **Lambdas** (splitter, worker, api) con `LabRole` y sus variables de entorno.
-   Reserved concurrency del worker = 3.
-5. **Trigger S3 → Splitter** (primero `add-permission`, luego la notificación del bucket).
-6. **Trigger SQS → Worker** (event source mapping, batchSize 5, ReportBatchItemFailures).
-7. **API Gateway HTTP API → API Lambda** (+ permiso de invocación).
-
-### Comandos
+## 2. Variables de entorno
 
 ```bash
-cd rubricaia/deploy
-cp env.example.sh env.sh
-# edita env.sh: pon tu GROQ_API_KEY (y revisa AWS_REGION)
-source env.sh
-bash deploy.sh
+cp deploy/env.example.sh deploy/env.sh   # luego edita deploy/env.sh
+source deploy/env.sh
 ```
 
-Al terminar, el script imprime y guarda en `deploy/outputs.env`:
-`BUCKET`, `TABLE`, `QUEUE_URL`, `DLQ_URL`, `API_URL`.
+| Variable | Para qué | Ejemplo |
+|---|---|---|
+| `GROQ_API_KEY` | LLM (Worker y resumen del Report) | `gsk_...` |
+| `SERVERLESS_ACCESS_KEY` | autenticar Serverless v4 | `...` |
+| `JWT_SECRET` | firmar los JWT | `openssl rand -hex 32` |
+| `TEACHER_EMAILS` | correos que entran como profesor (coma) | `prof@utec.edu.pe` |
+| `TEACHER_EMAIL` | correo que recibe el aviso SNS | `prof@utec.edu.pe` |
 
-> **Recordatorio Learner Lab:** cada vez que reinicias el lab, las credenciales
-> cambian. S3/DynamoDB/SQS/Lambda **persisten** (no se borran), solo necesitas
-> volver a configurar el AWS CLI con las credenciales nuevas. No tienes que re-desplegar.
+> `deploy/env.sh` **no se commitea** (lleva secretos). El dominio permitido
+> (`ALLOWED_DOMAIN=utec.edu.pe`) está en `serverless.yml`.
 
----
-
-## 3. Prueba rápida con 2–3 filas (antes del lote completo)
-
-**Objetivo:** validar la tubería S3→Splitter→SQS→Worker→DynamoDB **sin quemar cuota de Groq**.
+## 3. Desplegar el backend
 
 ```bash
 source deploy/env.sh
-source deploy/outputs.env   # trae BUCKET, TABLE, API_URL...
-
-# 1) CSV mini de 3 filas
-cat > /tmp/mini.csv <<'CSV'
-id_estudiante,texto_entrega
-T01,"Mi proyecto aborda la desercion estudiantil. Propongo alertas tempranas. Impacto: reducir 15% la desercion."
-T02,"Hice una app de reciclaje. Esta buena."
-T03,"El problema es la falta de feedback temprano en trabajos. Caso de uso: revision automatica con IA. Impacto medible por mejora de nota."
-CSV
-
-# 2) Subir al bucket con un jobId de prueba (dispara el Splitter)
-JOB="job-test-001"
-aws s3 cp /tmp/mini.csv "s3://${BUCKET}/inputs/${JOB}/submissions.csv" \
-  --metadata rubrica="1) Problema real. 2) Usuario afectado. 3) Caso de uso. 4) Impacto con metricas."
-
-# 3) Esperar ~15-30s y consultar el estado por API
-curl -s "${API_URL}/jobs/${JOB}" | python -m json.tool
+serverless deploy
+serverless info        # endpoint del API + recursos
 ```
 
-Resultado esperado: los 3 entregables pasan de `PENDING` → `PROCESSING` → `DONE`,
-con `cumplimiento`, `criterios_ok`, `faltantes` y `sugerencias`.
-Cuando funcione, repite con `samples/submissions.csv` (8 filas) o tu lote de 20–30.
+Un `serverless deploy` crea/actualiza de cero, en orden y con dependencias resueltas:
 
----
+- **DynamoDB** `rubricaia-dev` (jobs, con Streams) y `rubricaia-lms-dev` (usuarios,
+  clases, tareas, membresías).
+- **S3** `rubricaia-inputs-<acct>-dev` con CORS y notificación `ObjectCreated` → Splitter.
+- **SQS** `rubricaia-jobs-dev` + DLQ `rubricaia-dlq-dev` (redrive, maxReceiveCount 3).
+- **EventBridge** bus `rubricaia-events-dev`, **SNS** `rubricaia-notify-dev` (+ suscripción
+  al `TEACHER_EMAIL`) y la regla `JobCompleted` con fan-out a SNS + Report.
+- **API Gateway** HTTP API y las **7 Lambdas** (todas con `LabRole`).
 
-## 4. Checklist de verificación de conexiones
+> **Confirma la suscripción SNS:** tras el primer deploy AWS manda un correo a
+> `TEACHER_EMAIL` con "Confirm subscription". Haz clic una vez (queda confirmado).
 
-Marca cada uno. Si alguno falla, revisa el componente indicado.
+## 4. Desplegar el frontend
 
-- [ ] **S3 creado y con CORS**
-  `aws s3api get-bucket-cors --bucket "$BUCKET"`
-- [ ] **DynamoDB ACTIVE**
-  `aws dynamodb describe-table --table-name "$TABLE" --query 'Table.TableStatus'` → `ACTIVE`
-- [ ] **Cola principal con RedrivePolicy a la DLQ**
-  `aws sqs get-queue-attributes --queue-url "$QUEUE_URL" --attribute-names RedrivePolicy`
-- [ ] **3 Lambdas activas**
-  `aws lambda list-functions --query "Functions[?starts_with(FunctionName,'rubricaia')].FunctionName"`
-- [ ] **Notificación S3 → Splitter configurada**
-  `aws s3api get-bucket-notification-configuration --bucket "$BUCKET"`
-- [ ] **Event source mapping SQS → Worker habilitado**
-  `aws lambda list-event-source-mappings --function-name rubricaia-worker --query 'EventSourceMappings[].State'` → `Enabled`
-- [ ] **Splitter corrió** (tras subir el CSV): hay item META en DynamoDB
-  `aws dynamodb get-item --table-name "$TABLE" --key '{"PK":{"S":"JOB#job-test-001"},"SK":{"S":"META"}}'`
-- [ ] **Worker procesó**: items en estado `DONE`
-  `curl -s "$API_URL/jobs/job-test-001"` → `done` > 0
-- [ ] **API responde**: `curl -s "$API_URL/jobs"` lista el job de prueba
-- [ ] **Logs sin errores**: CloudWatch → `/aws/lambda/rubricaia-worker` y `.../rubricaia-splitter`
+```bash
+echo "API_URL=$(serverless info --verbose | grep -m1 'ANY ' | awk '{print $3}')" > deploy/outputs.env
+# (o pega manualmente el endpoint de 'serverless info')
+source deploy/env.sh
+bash deploy/deploy-frontend.sh
+```
 
-### Verificación del reintento / resiliencia (para la demo)
-Para forzar el camino de error y ver la DLQ:
-- Pon temporalmente una `GROQ_API_KEY` inválida en el Worker
-  (`aws lambda update-function-configuration --function-name rubricaia-worker --environment ...`),
-  sube un CSV, y observa: los items pasan a `RETRYING` y tras 3 intentos a `FAILED`;
-  los mensajes aparecen en la **DLQ** (`aws sqs get-queue-attributes --queue-url "$DLQ_URL" --attribute-names ApproximateNumberOfMessages`).
-  Restaura la key buena al terminar. **Ningún dato se pierde** (queda en DLQ + estado FAILED visible).
+Hace `npm install`, `vite build` con `VITE_API_URL` y publica en Amplify. La URL de
+Amplify se mantiene entre despliegues; el endpoint del API **sí cambia** en un deploy
+fresco (remove+deploy), por eso hay que reconstruir el frontend con la nueva `API_URL`.
 
----
+## 5. Prueba por la interfaz (flujo completo)
 
-## 5. Troubleshooting rápido
+1. Abre la URL de Amplify. Regístrate con un correo `@utec.edu.pe`. Si está en
+   `TEACHER_EMAILS` entras como **profesor**; si no, como **estudiante**.
+2. Como **profesor**: crea una **clase**, entra a "Gestionar", crea una **tarea** (título,
+   rúbrica, pesos opcionales, fecha) e **invita** el correo de un alumno.
+3. Como **estudiante** (ese correo): acepta la invitación, abre la tarea y sube un
+   **PDF o Word**. Verás "Evaluando…" y luego tu cumplimiento criterio por criterio.
+4. Como **profesor**: en la tarea pulsa **"Entregas"** para ver el cumplimiento de cada
+   alumno, el promedio y los criterios más fallados de la clase.
+
+## 6. Prueba del pipeline por CLI (sin frontend)
+
+Valida la tubería S3 → Splitter → SQS → Worker → Groq → DynamoDB → Aggregator. Si no se
+fija rúbrica, el Splitter usa `DEFAULT_RUBRICA` (variable de entorno en `serverless.yml`).
+
+```bash
+source deploy/env.sh
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+BUCKET="rubricaia-inputs-${ACCOUNT_ID}-dev"
+API_URL="<endpoint de 'serverless info'>"
+JOB="job-test-$(date +%s)"
+
+aws s3 cp samples/submissions.csv "s3://${BUCKET}/inputs/${JOB}/submissions.csv"
+sleep 25
+curl -s "${API_URL}/jobs/${JOB}" | python3 -m json.tool
+```
+
+Esperado: los entregables pasan `PENDING → PROCESSING → DONE` con `cumplimiento`,
+`criterios`, `criterios_ok`, `faltantes` y `sugerencias`.
+
+## 7. Verificación de recursos
+
+```bash
+aws dynamodb describe-table --table-name rubricaia-dev      --query 'Table.TableStatus'
+aws dynamodb describe-table --table-name rubricaia-lms-dev  --query 'Table.TableStatus'
+aws sqs get-queue-attributes --queue-url "$(aws sqs get-queue-url --queue-name rubricaia-jobs-dev --query QueueUrl --output text)" --attribute-names RedrivePolicy
+aws lambda list-functions --query "Functions[?starts_with(FunctionName,'rubricaia')].FunctionName"
+aws events list-rules --event-bus-name rubricaia-events-dev --query 'Rules[].Name'
+```
+
+## 8. Demostrar resiliencia (reintentos + DLQ)
+
+Para forzar el camino de error en la demo: pon temporalmente una `GROQ_API_KEY` inválida
+en el Worker, sube un lote y observa cómo los ítems pasan a `RETRYING` y, tras 3 intentos,
+a `FAILED`, con los mensajes acumulándose en la **DLQ** (ningún dato se pierde). Restaura
+la key y usa el botón **"Reprocesar fallidos"** (o `POST /jobs/{id}/retry`) para
+re-encolarlos.
+
+```bash
+aws sqs get-queue-attributes \
+  --queue-url "$(aws sqs get-queue-url --queue-name rubricaia-dlq-dev --query QueueUrl --output text)" \
+  --attribute-names ApproximateNumberOfMessages
+```
+
+## 9. Troubleshooting
 
 | Síntoma | Causa probable | Solución |
 |---|---|---|
-| Splitter no se dispara | falta permiso/notificación S3 | re-aplica paso 5; verifica prefijo `inputs/` y sufijo `.csv` |
-| Worker no consume | event source mapping deshabilitado | `aws lambda list-event-source-mappings ...` → debe estar `Enabled` |
-| Todos los items en FAILED | `GROQ_API_KEY` mala o modelo inválido | revisa env del worker y CloudWatch |
-| `create-function` falla por runtime | Learner Lab sin python3.12 | `export PY_RUNTIME=python3.11` y re-deploy |
-| reserved concurrency falla | límite de cuenta del lab | coméntalo; no es crítico para la demo |
-| API 500 en /jobs | tabla vacía o permisos | sube primero un CSV; revisa CloudWatch de `rubricaia-api` |
+| Deploy falla por crear roles | Learner Lab no permite IAM roles | ya se usa `LabRole`; no cambiar `provider.iam.role` |
+| `Cannot resolve '${env:GROQ_API_KEY}'` | variable no exportada | `source deploy/env.sh` antes de `serverless deploy` |
+| Login pide navegador | falta `SERVERLESS_ACCESS_KEY` | expórtala (VM headless) |
+| Worker: todos `FAILED` | `GROQ_API_KEY` mala o modelo inválido | revisa env del worker + CloudWatch |
+| Subida del navegador "Failed to fetch" | CORS del bucket | ya está en IaC (`InputsBucket`); re-deploy |
+| El alumno no ve su clase | no aceptó la invitación | debe pulsar "Aceptar" (compuerta de F3) |
+| El profesor sale como estudiante | correo no está en `TEACHER_EMAILS` | añádelo y vuelve a iniciar sesión |
+| No llega el email de SNS | suscripción sin confirmar | confirma el correo de "Confirm subscription" |
+| runtime python3.12 no disponible | lab sin esa versión | cambia `provider.runtime` a `python3.11` |
+
+## 10. Limpieza
+
+```bash
+serverless remove        # borra toda la infraestructura del stack
+```
