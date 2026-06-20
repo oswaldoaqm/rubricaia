@@ -14,6 +14,7 @@ import {
   updateTask,
   deleteTask,
   getTaskSubmissions,
+  getTaskAttempts,
 } from "./lms";
 
 const DEFAULT_RUBRICA = `1) Define un problema real y concreto.
@@ -355,6 +356,13 @@ function TaskSubmit({ classId, task, onBack }) {
   const [phase, setPhase] = useState("");
   const [error, setError] = useState(null);
   const [jobId, setJobId] = useState(task.submissionJobId || null);
+  const [attempts, setAttempts] = useState([]);
+
+  useEffect(() => {
+    getTaskAttempts(task.taskId)
+      .then((d) => setAttempts(d.attempts || []))
+      .catch(() => {});
+  }, [task.taskId, jobId]);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -398,6 +406,7 @@ function TaskSubmit({ classId, task, onBack }) {
         </button>
         <h2>{task.title}</h2>
         <StudentResult jobId={jobId} onResubmit={() => setJobId(null)} />
+        <AttemptHistory attempts={attempts} />
       </main>
     );
   }
@@ -439,7 +448,47 @@ function TaskSubmit({ classId, task, onBack }) {
           {busy ? phase || "Procesando…" : "Enviar y evaluar"}
         </button>
       </form>
+      <AttemptHistory attempts={attempts} />
     </main>
+  );
+}
+
+// G1: historial de intentos del alumno en una tarea (evolución del cumplimiento).
+function AttemptHistory({ attempts }) {
+  if (!attempts || attempts.length < 2) return null;
+  const done = attempts.filter((a) => a.status === "DONE" && a.cumplimiento != null);
+  const last = done.length ? done[done.length - 1].cumplimiento : null;
+  const first = done.length ? done[0].cumplimiento : null;
+  const delta = last != null && first != null ? last - first : null;
+
+  return (
+    <div className="history">
+      <h3>
+        Tus intentos ({attempts.length})
+        {delta != null && delta !== 0 && (
+          <span className={"trend " + (delta > 0 ? "good" : "bad")}>
+            {delta > 0 ? "▲ +" : "▼ "}
+            {Math.abs(delta)} pts
+          </span>
+        )}
+      </h3>
+      <ul className="historylist">
+        {attempts.map((a, i) => {
+          const kind =
+            a.cumplimiento >= 70 ? "good" : a.cumplimiento >= 40 ? "mid" : "bad";
+          return (
+            <li key={i}>
+              <span className="muted small">
+                Intento {i + 1} · {(a.submittedAt || "").slice(0, 10)}
+              </span>
+              <span className={"hpct " + (a.cumplimiento != null ? kind : "")}>
+                {a.status === "DONE" && a.cumplimiento != null ? a.cumplimiento + "%" : "—"}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 

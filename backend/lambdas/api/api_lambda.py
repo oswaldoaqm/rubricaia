@@ -181,6 +181,16 @@ def create_upload(event):
                 "submittedAt": now,
             }
         )
+        # G1: registro versionado por intento (no sobrescribe; ordena por timestamp).
+        lms_table.put_item(
+            Item={
+                "PK": f"USER#{scope['studentEmail']}",
+                "SK": f"SUBVER#{task_id}#{now}",
+                "jobId": job_id,
+                "taskId": task_id,
+                "submittedAt": now,
+            }
+        )
 
     params = {"Bucket": BUCKET, "Key": key, "ContentType": "text/csv"}
     url = s3.generate_presigned_url("put_object", Params=params, ExpiresIn=URL_EXPIRES)

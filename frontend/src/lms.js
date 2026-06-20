@@ -47,3 +47,7 @@ export const getTaskSubmissions = (classId, taskId) =>
     `/tasks/submissions?classId=${encodeURIComponent(classId)}&taskId=${encodeURIComponent(taskId)}`,
     "GET"
   );
+
+// G1: historial de intentos del propio alumno en una tarea.
+export const getTaskAttempts = (taskId) =>
+  call(`/tasks/attempts?taskId=${encodeURIComponent(taskId)}`, "GET");

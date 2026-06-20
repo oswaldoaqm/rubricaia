@@ -94,6 +94,8 @@ def handler(event, context):
             return get_detail(email, role, event)
         if method == "GET" and path.endswith("/tasks/submissions"):
             return get_task_submissions(email, role, event)
+        if method == "GET" and path.endswith("/tasks/attempts"):
+            return get_task_attempts(email, event)
         if method == "POST" and path.endswith("/tasks/update"):
             return update_task(email, role, event)
         if method == "POST" and path.endswith("/tasks/delete"):
@@ -526,3 +528,36 @@ def get_task_submissions(email, role, event):
         "criterios_fallados": criterios_fallados,
     }
     return _resp(200, {"submissions": results, "stats": stats})
+
+
+# --- GET /tasks/attempts?taskId=... (G1: historial del propio alumno) -------
+def get_task_attempts(email, event):
+    qs = event.get("queryStringParameters") or {}
+    task_id = (qs.get("taskId") or "").strip()
+    items = table.query(
+        KeyConditionExpression=Key("PK").eq(f"USER#{email}")
+        & Key("SK").begins_with(f"SUBVER#{task_id}#")
+    ).get("Items", [])
+
+    attempts = []
+    for it in items:
+        job_id = it.get("jobId")
+        cumplimiento, status = None, "PENDING"
+        if job_id and jobs_table is not None:
+            jit = jobs_table.query(
+                KeyConditionExpression=Key("PK").eq(f"JOB#{job_id}")
+            ).get("Items", [])
+            ent = [i for i in jit if i.get("SK", "").startswith("ITEM#")]
+            if ent:
+                status = ent[0].get("status", "PENDING")
+                cumplimiento = ent[0].get("cumplimiento")
+        attempts.append(
+            {
+                "jobId": job_id,
+                "submittedAt": it.get("submittedAt"),
+                "status": status,
+                "cumplimiento": cumplimiento,
+            }
+        )
+    attempts.sort(key=lambda a: a.get("submittedAt") or "")
+    return _resp(200, {"attempts": attempts})
