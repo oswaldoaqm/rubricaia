@@ -228,13 +228,17 @@ def process_record(record):
 
 # --- F5: cumplimiento ponderado --------------------------------------------
 def _apply_weights(criterios, llm_cumplimiento, pesos):
-    """Si hay pesos validos (uno por criterio), calcula el cumplimiento ponderado;
-    si no, usa el porcentaje holistico que devolvio el LLM."""
-    if pesos and criterios and len(pesos) == len(criterios):
-        total = sum(float(p) for p in pesos)
-        if total > 0:
-            got = sum(float(p) for c, p in zip(criterios, pesos) if c.get("cumple"))
-            return int(round(got / total * 100)), "ponderado"
+    """El cumplimiento se DERIVA de los criterios (consistente con las marcas
+    cumple/no-cumple): ponderado si el docente fijo pesos, equitativo en caso
+    contrario. Solo si no hubo criterios se cae al numero holistico del LLM."""
+    if criterios:
+        if pesos and len(pesos) == len(criterios):
+            total = sum(float(p) for p in pesos)
+            if total > 0:
+                got = sum(float(p) for c, p in zip(criterios, pesos) if c.get("cumple"))
+                return int(round(got / total * 100)), "ponderado"
+        met = sum(1 for c in criterios if c.get("cumple"))
+        return int(round(met / len(criterios) * 100)), "equitativo"
     return int(llm_cumplimiento), "llm"
 
 

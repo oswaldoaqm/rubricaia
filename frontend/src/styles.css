@@ -188,6 +188,7 @@ input[type="file"] { padding: 8px; background: var(--panel2); cursor: pointer; }
 .modalhead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
 .modalhead h3 { margin: 0; }
 .x { cursor: pointer; border: none; background: none; font-size: 24px; color: var(--muted); line-height: 1; }
+.critsummary { font-size: 14px; color: var(--muted); margin: 0 0 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
 .criterios { display: flex; flex-direction: column; gap: 10px; }
 .crit { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
 .crit.ok { background: var(--good-soft); border-color: #cadccf; }

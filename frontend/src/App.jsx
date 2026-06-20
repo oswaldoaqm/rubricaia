@@ -1216,6 +1216,13 @@ function Detail({ r, onClose }) {
           </button>
         </div>
 
+        {hasCriterios && (
+          <p className="critsummary">
+            Cumple <strong>{r.criterios.filter((c) => c.cumple).length}</strong> de{" "}
+            {r.criterios.length} criterios · {r.cumplimiento}%
+          </p>
+        )}
+
         {hasCriterios ? (
           <div className="criterios">
             {r.criterios.map((c, i) => (
