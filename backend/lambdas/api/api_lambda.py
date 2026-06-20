@@ -159,6 +159,7 @@ def create_upload(event):
     table.put_item(Item=meta)
 
     # F5: puntero de entrega del alumno (para reabrir la tarea y ver su resultado).
+    # P2: índice por clase/tarea (para que el profesor liste las entregas sin scan).
     if scope:
         lms_table.put_item(
             Item={
@@ -166,6 +167,16 @@ def create_upload(event):
                 "SK": f"SUBMISSION#{task_id}",
                 "jobId": job_id,
                 "classId": class_id,
+                "taskId": task_id,
+                "submittedAt": now,
+            }
+        )
+        lms_table.put_item(
+            Item={
+                "PK": f"CLASS#{class_id}",
+                "SK": f"SUB#{task_id}#{scope['studentEmail']}",
+                "jobId": job_id,
+                "studentEmail": scope["studentEmail"],
                 "taskId": task_id,
                 "submittedAt": now,
             }

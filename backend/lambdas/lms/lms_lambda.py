@@ -36,9 +36,11 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "common"))
 from authlib import auth_from_event  # noqa: E402
 
 LMS_TABLE = os.environ["LMS_TABLE"]
+JOBS_TABLE = os.environ.get("TABLE_NAME", "")  # P2: leer resultados del pipeline
 ALLOWED_DOMAIN = os.environ.get("ALLOWED_DOMAIN", "utec.edu.pe").lower().lstrip("@")
 ddb = boto3.resource("dynamodb")
 table = ddb.Table(LMS_TABLE)
+jobs_table = ddb.Table(JOBS_TABLE) if JOBS_TABLE else None
 
 CORS = {
     "Content-Type": "application/json",
@@ -48,8 +50,18 @@ CORS = {
 }
 
 
+def _num(o):
+    if isinstance(o, Decimal):
+        return int(o) if o % 1 == 0 else float(o)
+    raise TypeError
+
+
 def _resp(code, body):
-    return {"statusCode": code, "headers": CORS, "body": json.dumps(body, ensure_ascii=False)}
+    return {
+        "statusCode": code,
+        "headers": CORS,
+        "body": json.dumps(body, ensure_ascii=False, default=_num),
+    }
 
 
 def now_iso():
@@ -80,6 +92,8 @@ def handler(event, context):
             return accept_invite(email, event)
         if method == "GET" and path.endswith("/classes/detail"):
             return get_detail(email, role, event)
+        if method == "GET" and path.endswith("/tasks/submissions"):
+            return get_task_submissions(email, role, event)
         if method == "POST" and path.endswith("/tasks/update"):
             return update_task(email, role, event)
         if method == "POST" and path.endswith("/tasks/delete"):
@@ -447,3 +461,68 @@ def delete_task(email, role, event):
         return err
     table.delete_item(Key={"PK": f"CLASS#{class_id}", "SK": f"TASK#{task_id}"})
     return _resp(200, {"deleted": task_id})
+
+
+# --- GET /tasks/submissions?classId=&taskId= (P2: vista del profesor) -------
+def get_task_submissions(email, role, event):
+    if role != "profesor":
+        return _resp(403, {"error": "Solo el profesor ve las entregas"})
+    qs = event.get("queryStringParameters") or {}
+    class_id = (qs.get("classId") or "").strip()
+    task_id = (qs.get("taskId") or "").strip()
+    _, err = _owned_class(class_id, email)
+    if err:
+        return err
+
+    subs = table.query(
+        KeyConditionExpression=Key("PK").eq(f"CLASS#{class_id}")
+        & Key("SK").begins_with(f"SUB#{task_id}#")
+    ).get("Items", [])
+
+    results = []
+    for s in subs:
+        job_id = s.get("jobId")
+        item = {}
+        if job_id and jobs_table is not None:
+            jitems = jobs_table.query(
+                KeyConditionExpression=Key("PK").eq(f"JOB#{job_id}")
+            ).get("Items", [])
+            ent = [i for i in jitems if i.get("SK", "").startswith("ITEM#")]
+            item = ent[0] if ent else {}
+        results.append({
+            "studentEmail": s.get("studentEmail"),
+            "jobId": job_id,
+            "status": item.get("status", "PENDING"),
+            "cumplimiento": item.get("cumplimiento"),
+            "criterios": item.get("criterios", []),
+            "criterios_ok": item.get("criterios_ok", []),
+            "faltantes": item.get("faltantes", []),
+            "sugerencias": item.get("sugerencias", []),
+            "submittedAt": s.get("submittedAt"),
+        })
+    results.sort(key=lambda r: r.get("studentEmail") or "")
+
+    done = [r for r in results if r["status"] == "DONE" and r["cumplimiento"] is not None]
+    cumpls = [int(r["cumplimiento"]) for r in done]
+    promedio = round(sum(cumpls) / len(cumpls)) if cumpls else 0
+    dist = {"low": 0, "mid": 0, "high": 0}
+    for c in cumpls:
+        dist["high" if c >= 70 else "mid" if c >= 40 else "low"] += 1
+    failc = {}
+    for r in done:
+        for c in r["criterios"]:
+            if isinstance(c, dict) and not c.get("cumple"):
+                n = str(c.get("criterio", "")).strip()
+                if n:
+                    failc[n] = failc.get(n, 0) + 1
+    criterios_fallados = sorted(
+        [{"criterio": k, "count": v} for k, v in failc.items()], key=lambda x: -x["count"]
+    )
+    stats = {
+        "total": len(results),
+        "evaluados": len(done),
+        "promedio": promedio,
+        "distribucion": dist,
+        "criterios_fallados": criterios_fallados,
+    }
+    return _resp(200, {"submissions": results, "stats": stats})

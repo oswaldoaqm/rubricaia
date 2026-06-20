@@ -13,6 +13,7 @@ import {
   createTask,
   updateTask,
   deleteTask,
+  getTaskSubmissions,
 } from "./lms";
 
 const DEFAULT_RUBRICA = `1) Define un problema real y concreto.
@@ -436,6 +437,7 @@ function TeacherClassDetail({ classId, onBack }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [editingTask, setEditingTask] = useState(null);
+  const [openSubmissions, setOpenSubmissions] = useState(null);
 
   async function load() {
     try {
@@ -485,6 +487,16 @@ function TeacherClassDetail({ classId, onBack }) {
     } catch (err) {
       setError(err.message);
     }
+  }
+
+  if (openSubmissions) {
+    return (
+      <TaskSubmissions
+        classId={classId}
+        task={openSubmissions}
+        onBack={() => setOpenSubmissions(null)}
+      />
+    );
   }
 
   return (
@@ -545,6 +557,9 @@ function TeacherClassDetail({ classId, onBack }) {
                     </div>
                   </div>
                   <div className="rowbtns">
+                    <button className="btn small" onClick={() => setOpenSubmissions(t)}>
+                      Entregas
+                    </button>
                     <button className="btn small" onClick={() => setEditingTask(t)}>
                       Editar
                     </button>
@@ -654,6 +669,83 @@ function TaskForm({ classId, editing, onSaved, onCancel }) {
         )}
       </div>
     </form>
+  );
+}
+
+// P2: el profesor ve las entregas y resultados de una tarea.
+function TaskSubmissions({ classId, task, onBack }) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+  const [selected, setSelected] = useState(null);
+
+  useEffect(() => {
+    getTaskSubmissions(classId, task.taskId)
+      .then(setData)
+      .catch((e) => setError(e.message));
+  }, [classId, task.taskId]);
+
+  return (
+    <main className="card">
+      <button className="btn ghost" onClick={onBack}>
+        ← Volver
+      </button>
+      <h2>Entregas · {task.title}</h2>
+      {error && <div className="error">{error}</div>}
+      {!data ? (
+        <p className="muted">Cargando…</p>
+      ) : (
+        <>
+          <p className="muted">
+            {data.stats.evaluados} de {data.stats.total} entrega(s) evaluada(s)
+          </p>
+          {data.stats.evaluados > 0 && <InsightsPanel insights={data.stats} />}
+          {data.submissions.length === 0 ? (
+            <p className="muted">Aún no hay entregas para esta tarea.</p>
+          ) : (
+            <table className="grid">
+              <thead>
+                <tr>
+                  <th>Estudiante</th>
+                  <th>Estado</th>
+                  <th>Cumplimiento</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.submissions.map((r) => (
+                  <tr key={r.studentEmail}>
+                    <td className="mono small">{r.studentEmail}</td>
+                    <td>
+                      <span className={"badge " + r.status}>
+                        {STATUS_LABEL[r.status] || r.status}
+                      </span>
+                    </td>
+                    <td>
+                      {r.cumplimiento != null ? (
+                        <CumpBar v={r.cumplimiento} />
+                      ) : (
+                        <span className="muted">—</span>
+                      )}
+                    </td>
+                    <td>
+                      {r.status === "DONE" && (
+                        <button
+                          className="btn link"
+                          onClick={() => setSelected({ ...r, id_estudiante: r.studentEmail })}
+                        >
+                          ver detalle
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </>
+      )}
+      {selected && <Detail r={selected} onClose={() => setSelected(null)} />}
+    </main>
   );
 }
 

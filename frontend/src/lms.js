@@ -35,3 +35,10 @@ export const updateTask = (classId, taskId, task) =>
   call("/tasks/update", "POST", { classId, taskId, ...task });
 export const deleteTask = (classId, taskId) =>
   call("/tasks/delete", "POST", { classId, taskId });
+
+// P2: entregas + resultados de una tarea (vista del profesor).
+export const getTaskSubmissions = (classId, taskId) =>
+  call(
+    `/tasks/submissions?classId=${encodeURIComponent(classId)}&taskId=${encodeURIComponent(taskId)}`,
+    "GET"
+  );
