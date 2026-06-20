@@ -22,7 +22,7 @@ services:
       - "8000:8000"
     environment:
       QDRANT_URL: http://qdrant:6333
-      EMBED_MODEL: intfloat/multilingual-e5-small
+      EMBED_MODEL: intfloat/multilingual-e5-large
       COLLECTION: rubricaia
     depends_on:
       - qdrant

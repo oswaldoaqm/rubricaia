@@ -46,7 +46,7 @@ docker network create ragnet
 docker run -d --name qdrant --network ragnet -v qdrant_data:/qdrant/storage qdrant/qdrant
 docker build -t rag-service .
 docker run -d --name rag --network ragnet -p 8000:8000 \
-  -e QDRANT_URL=http://qdrant:6333 -e EMBED_MODEL=intfloat/multilingual-e5-small rag-service
+  -e QDRANT_URL=http://qdrant:6333 -e EMBED_MODEL=intfloat/multilingual-e5-large rag-service
 ```
 
 La primera vez, el servicio descarga el modelo de embeddings (~100 MB) y siembra material

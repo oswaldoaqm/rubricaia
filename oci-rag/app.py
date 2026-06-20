@@ -15,7 +15,7 @@ Endpoints:
 
 Variables de entorno:
   QDRANT_URL   = http://qdrant:6333   (servicio interno del compose)
-  EMBED_MODEL  = intfloat/multilingual-e5-small  (multilingüe, ideal español)
+  EMBED_MODEL  = intfloat/multilingual-e5-large  (multilingüe, soportado por FastEmbed)
   COLLECTION   = rubricaia
 """
 
@@ -29,7 +29,7 @@ from qdrant_client.models import Distance, VectorParams, PointStruct
 from fastembed import TextEmbedding
 
 QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
-EMBED_MODEL = os.environ.get("EMBED_MODEL", "intfloat/multilingual-e5-small")
+EMBED_MODEL = os.environ.get("EMBED_MODEL", "intfloat/multilingual-e5-large")
 COLLECTION = os.environ.get("COLLECTION", "rubricaia")
 
 app = FastAPI(title="RubricaIA RAG service")
