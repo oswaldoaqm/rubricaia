@@ -87,22 +87,25 @@ def handler(event, context):
             or DEFAULT_RUBRICA
         )
         created = existing.get("createdAt") or now_iso()
+        # F5: pesos por criterio (opcional) que el docente fijo en /uploads.
+        pesos = _plain_pesos(existing.get("pesos"))
 
         reader = csv.DictReader(io.StringIO(text))
         rows = [r for r in reader if (r.get("id_estudiante") or "").strip()]
 
-        # 1) Registro/actualizacion del META del job (preserva createdAt)
-        table.put_item(
-            Item={
-                "PK": f"JOB#{job_id}",
-                "SK": "META",
-                "status": "PROCESSING",
-                "total": len(rows),
-                "rubrica": rubrica,
-                "createdAt": created,
-                "updatedAt": now_iso(),
-            }
-        )
+        # 1) Registro/actualizacion del META del job (preserva createdAt y pesos)
+        meta_item = {
+            "PK": f"JOB#{job_id}",
+            "SK": "META",
+            "status": "PROCESSING",
+            "total": len(rows),
+            "rubrica": rubrica,
+            "createdAt": created,
+            "updatedAt": now_iso(),
+        }
+        if existing.get("pesos") is not None:
+            meta_item["pesos"] = existing["pesos"]  # preservar (no perder los pesos)
+        table.put_item(Item=meta_item)
 
         # 2) Crear items PENDING (batch_writer) y juntar mensajes SQS
         sqs_entries = []
@@ -117,6 +120,9 @@ def handler(event, context):
                         "SK": f"ITEM#{sid}",
                         "status": "PENDING",
                         "id_estudiante": sid,
+                        # F1/F4: guardamos el texto en el item para poder reprocesar
+                        # fallidos (re-encolar sin el CSV) y calcular similitud.
+                        "texto": texto,
                         "createdAt": now_iso(),
                         "updatedAt": now_iso(),
                     }
@@ -131,6 +137,7 @@ def handler(event, context):
                                 "idEstudiante": sid,
                                 "texto": texto,
                                 "rubrica": rubrica,
+                                "pesos": pesos,  # F5: None si el docente no fijo pesos
                             }
                         ),
                     }
@@ -151,3 +158,17 @@ def handler(event, context):
 def _chunks(lst, size):
     for i in range(0, len(lst), size):
         yield lst[i : i + size]
+
+
+def _plain_pesos(pesos):
+    """Convierte la lista de pesos (Decimals de DynamoDB) a numeros JSON-serializables."""
+    if not pesos:
+        return None
+    out = []
+    for p in pesos:
+        try:
+            f = float(p)
+        except (TypeError, ValueError):
+            return None
+        out.append(int(f) if f.is_integer() else f)
+    return out or None

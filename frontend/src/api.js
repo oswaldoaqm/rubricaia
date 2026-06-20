@@ -8,11 +8,14 @@ if (!API) {
 }
 
 // 1) Pide una presigned URL para subir el CSV.
-export async function createUpload(rubrica) {
+// pesos: array opcional de números (uno por criterio) para cumplimiento ponderado (F5).
+export async function createUpload(rubrica, pesos) {
+  const body = { rubrica };
+  if (pesos && pesos.length) body.pesos = pesos;
   const r = await fetch(`${API}/uploads`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ rubrica }),
+    body: JSON.stringify(body),
   });
   if (!r.ok) throw new Error(`createUpload HTTP ${r.status}`);
   return r.json(); // { jobId, uploadUrl, headers, key }
@@ -36,4 +39,11 @@ export async function getReport(jobId, format = "html") {
   const r = await fetch(`${API}/jobs/${jobId}/report?format=${format}`);
   if (!r.ok) throw new Error(`getReport HTTP ${r.status}`);
   return r.json(); // { ready, format, url }
+}
+
+// 5) Reprocesa los entregables en FAILED del job (F1).
+export async function retryFailed(jobId) {
+  const r = await fetch(`${API}/jobs/${jobId}/retry`, { method: "POST" });
+  if (!r.ok) throw new Error(`retryFailed HTTP ${r.status}`);
+  return r.json(); // { requeued }
 }

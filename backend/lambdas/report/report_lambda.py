@@ -28,9 +28,14 @@ Variables de entorno:
 
 import os
 import io
+import re
 import csv
 import json
+import math
 import html
+import unicodedata
+import urllib.request
+import urllib.error
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -39,6 +44,14 @@ from boto3.dynamodb.conditions import Key
 
 TABLE_NAME = os.environ["TABLE_NAME"]
 BUCKET = os.environ["BUCKET"]
+
+# F2: resumen ejecutivo por LLM (reusa la integracion Groq; env compartida).
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+# F4: umbral de similitud para marcar posible copia (coseno TF-IDF, 0..1).
+SIM_THRESHOLD = float(os.environ.get("SIM_THRESHOLD", "0.6"))
 
 s3 = boto3.client("s3")
 ddb = boto3.resource("dynamodb")
@@ -184,6 +197,32 @@ def _to_html(rep):
         for c in rep["criterios_mas_fallados"][:8]
     ) or "<li class='muted'>Sin criterios fallados</li>"
 
+    # F2: bloque de resumen ejecutivo (si el LLM lo genero).
+    resumen = rep.get("resumen_ejecutivo")
+    if resumen and (resumen.get("resumen") or resumen.get("recomendaciones")):
+        recs = "".join(f"<li>{e(r)}</li>" for r in resumen.get("recomendaciones", []))
+        resumen_html = (
+            '<div class="summary"><div class="lbl">🧠 Resumen ejecutivo (IA)</div>'
+            f"<p>{e(resumen.get('resumen', ''))}</p><ul class='recs'>{recs}</ul></div>"
+        )
+    else:
+        resumen_html = ""
+
+    # F4: bloque de posibles coincidencias (anti-copia).
+    sim = rep.get("similitud", [])
+    if sim:
+        sim_items = "".join(
+            f"<li><span class='pair'>{e(str(p['a']))} ↔ {e(str(p['b']))}</span>"
+            f"<b>{round(p['score'] * 100)}%</b></li>"
+            for p in sim[:10]
+        )
+        simil_html = (
+            f"<div class='simil'><div class='lbl'>⚠️ Posibles coincidencias ({len(sim)})</div>"
+            f"<ul>{sim_items}</ul></div>"
+        )
+    else:
+        simil_html = ""
+
     return f"""<!doctype html>
 <html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -212,6 +251,12 @@ def _to_html(rep):
   .topfail ul{{list-style:none;margin:8px 0 0;padding:0}}
   .topfail li{{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #2a3445}}
   .topfail b{{color:var(--bad)}} .muted{{color:var(--mut)}}
+  .summary{{background:linear-gradient(135deg,rgba(99,102,241,.16),rgba(99,102,241,.04));border:1px solid rgba(99,102,241,.4);border-radius:12px;padding:16px;margin-bottom:24px}}
+  .summary p{{margin:8px 0}} .recs{{margin:8px 0 0;padding-left:18px}} .recs li{{margin:4px 0}}
+  .simil{{background:rgba(234,179,8,.08);border:1px solid rgba(234,179,8,.4);border-radius:12px;padding:16px;margin-bottom:24px}}
+  .simil ul{{list-style:none;margin:8px 0 0;padding:0}}
+  .simil li{{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #2a3445}}
+  .simil .pair{{font-family:ui-monospace,Menlo,monospace}} .simil b{{color:var(--mid)}}
   .foot{{color:var(--mut);font-size:12px;margin-top:20px;text-align:center}}
 </style></head><body><div class="wrap">
   <h1>Reporte de clase</h1>
@@ -225,7 +270,9 @@ def _to_html(rep):
       <div class="lbl" style="margin-top:6px">Bajo {d['low']} · Medio {d['mid']} · Alto {d['high']}</div>
     </div>
   </div>
+  {resumen_html}
   <div class="topfail"><div class="lbl">Criterios más fallados de la clase</div><ul>{top}</ul></div>
+  {simil_html}
   <table><thead><tr><th>Estudiante</th><th>Estado</th><th>Cumplimiento</th><th>Faltantes</th></tr></thead>
   <tbody>{''.join(rows)}</tbody></table>
   <div class="foot">RúbricaIA · reporte generado automáticamente por la Report Lambda vía EventBridge</div>
@@ -234,6 +281,127 @@ def _to_html(rep):
 
 def _pct(part, whole):
     return round((part / whole) * 100) if whole else 0
+
+
+# --- F2: resumen ejecutivo de la clase por LLM -----------------------------
+def _llm_summary(rep):
+    """Una llamada extra a Groq para narrar el desempeno de la clase y recomendar
+    acciones. Es best-effort: si Groq falla, el reporte se genera igual sin esto."""
+    if not GROQ_API_KEY:
+        return None
+    s = rep["resumen"]
+    top = ", ".join(
+        f'{c["criterio"]} ({c["count"]})' for c in rep["criterios_mas_fallados"][:6]
+    ) or "ninguno"
+    system_prompt = (
+        "Eres un asesor pedagogico. Recibes estadisticas agregadas de un lote de "
+        "entregables evaluados contra una rubrica. Devuelve UNICAMENTE un objeto JSON "
+        "valido con estas claves:\n"
+        '  "resumen": 2-3 frases sobre el desempeno general de la clase,\n'
+        '  "recomendaciones": lista de 3 acciones concretas y accionables para el docente.\n'
+        "Se especifico y util. No agregues texto fuera del JSON."
+    )
+    user_prompt = (
+        f"Total: {s['total']} | Evaluados: {s['evaluados']} | Promedio: {s['promedio']}% | "
+        f"Distribucion (bajo/medio/alto): {s['distribucion']['low']}/"
+        f"{s['distribucion']['mid']}/{s['distribucion']['high']}.\n"
+        f"Criterios mas fallados: {top}.\n"
+        f"Rubrica: {rep.get('rubrica', '')[:600]}"
+    )
+    try:
+        body = _groq_chat(system_prompt, user_prompt)
+        data = json.loads(body["choices"][0]["message"]["content"])
+        recs = data.get("recomendaciones", [])
+        if isinstance(recs, str):
+            recs = [recs]
+        return {
+            "resumen": str(data.get("resumen", "")).strip(),
+            "recomendaciones": [str(r) for r in recs][:5],
+        }
+    except Exception as e:  # noqa: BLE001 - el reporte NUNCA falla por el resumen
+        print(f"Resumen LLM omitido: {e}")
+        return None
+
+
+def _groq_chat(system_prompt, user_prompt):
+    payload = {
+        "model": GROQ_MODEL,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": 0.3,
+        "response_format": {"type": "json_object"},
+    }
+    req = urllib.request.Request(
+        GROQ_URL,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (RubricaIA)",  # Cloudflare: no quitar
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+# --- F4: deteccion de similitud (TF-IDF + coseno, stdlib puro) -------------
+_STOP = set(
+    "de la el en y a los las que un una para por con se su del al lo como mas este "
+    "esta o e es son ser fue han ha hay le les nos sus pero si no sobre entre".split()
+)
+
+
+def _tokens(text):
+    text = unicodedata.normalize("NFKD", (text or "").lower())
+    text = "".join(c for c in text if not unicodedata.combining(c))
+    return [t for t in re.split(r"[^a-z0-9]+", text) if len(t) >= 3 and t not in _STOP]
+
+
+def _tfidf(docs):
+    n = len(docs)
+    df = {}
+    for toks in docs:
+        for t in set(toks):
+            df[t] = df.get(t, 0) + 1
+    idf = {t: math.log((n + 1) / (c + 1)) + 1 for t, c in df.items()}
+    vecs = []
+    for toks in docs:
+        tf = {}
+        for t in toks:
+            tf[t] = tf.get(t, 0) + 1
+        total = len(toks) or 1
+        vecs.append({t: (c / total) * idf[t] for t, c in tf.items()})
+    return vecs
+
+
+def _cosine(a, b):
+    common = set(a) & set(b)
+    if not common:
+        return 0.0
+    dot = sum(a[t] * b[t] for t in common)
+    na = math.sqrt(sum(v * v for v in a.values()))
+    nb = math.sqrt(sum(v * v for v in b.values()))
+    return dot / (na * nb) if na and nb else 0.0
+
+
+def _find_similar(items):
+    subs = [
+        (i.get("id_estudiante"), i.get("texto", ""))
+        for i in items
+        if i["SK"].startswith("ITEM#") and (i.get("texto") or "").strip()
+    ]
+    vecs = _tfidf([_tokens(t) for _, t in subs])
+    pairs = []
+    for x in range(len(subs)):
+        for y in range(x + 1, len(subs)):
+            score = _cosine(vecs[x], vecs[y])
+            if score >= SIM_THRESHOLD:
+                pairs.append({"a": subs[x][0], "b": subs[y][0], "score": round(score, 3)})
+    pairs.sort(key=lambda p: -p["score"])
+    return pairs
 
 
 # --- handler ---------------------------------------------------------------
@@ -250,6 +418,8 @@ def handler(event, context):
         return {"ok": False, "error": "job vacio"}
 
     rep = _build_report(job_id, items)
+    rep["similitud"] = _find_similar(items)        # F4: pares sospechosos
+    rep["resumen_ejecutivo"] = _llm_summary(rep)   # F2: narrativa + recomendaciones
     base = f"reports/{job_id}"
 
     s3.put_object(
@@ -271,11 +441,18 @@ def handler(event, context):
         ContentType="text/html; charset=utf-8",
     )
 
-    # Marca el reporte como listo para que la API/Frontend ofrezcan la descarga.
+    # Marca el reporte como listo y publica el nº de pares similares (F4) para que
+    # la API/Frontend ofrezcan la descarga y muestren la alerta de posible copia.
     table.update_item(
         Key={"PK": f"JOB#{job_id}", "SK": "META"},
-        UpdateExpression="SET report_ready = :t, report_at = :ts, updatedAt = :ts",
-        ExpressionAttributeValues={":t": True, ":ts": now_iso()},
+        UpdateExpression=(
+            "SET report_ready = :t, report_at = :ts, updatedAt = :ts, similar_count = :sc"
+        ),
+        ExpressionAttributeValues={
+            ":t": True,
+            ":ts": now_iso(),
+            ":sc": len(rep["similitud"]),
+        },
     )
 
     print(f"Reporte generado para {job_id}: {base}/report.{{json,csv,html}}")

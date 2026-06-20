@@ -146,6 +146,32 @@ textarea:focus { outline: 2px solid var(--primary); border-color: transparent; }
 .reportlabel { font-weight: 600; }
 .reportbtns { display: flex; gap: 8px; }
 
+/* --- F1: barra de reprocesar fallidos --- */
+.retrybar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 14px 0 4px;
+  padding: 12px 14px;
+  background: rgba(229, 82, 75, 0.10);
+  border: 1px solid rgba(229, 82, 75, 0.40);
+  border-radius: 12px;
+  font-size: 14px;
+}
+
+/* --- F4: alerta de similitud --- */
+.similalert {
+  margin: 14px 0 4px;
+  padding: 12px 14px;
+  background: rgba(240, 164, 49, 0.10);
+  border: 1px solid rgba(240, 164, 49, 0.40);
+  border-radius: 12px;
+  font-size: 14px;
+  color: var(--text);
+}
+
 .dashhead { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 
 .progress { margin: 18px 0 22px; }

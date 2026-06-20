@@ -11,6 +11,7 @@ Endpoints:
   GET  /jobs/{jobId}          -> estado + resultados de un job (progreso por entregable)
   GET  /jobs/{jobId}/report   -> presigned URL de descarga del reporte (Fase 3B)
                                  ?format=html|csv|json (default html)
+  POST /jobs/{jobId}/retry    -> re-encola los entregables en FAILED (F1)
 
 Despliegue (AWS Learner Lab):
   - Runtime  : python3.12
@@ -37,8 +38,10 @@ from boto3.dynamodb.conditions import Key, Attr
 TABLE_NAME = os.environ["TABLE_NAME"]
 BUCKET = os.environ["BUCKET"]
 URL_EXPIRES = int(os.environ.get("URL_EXPIRES", "300"))
+QUEUE_URL = os.environ.get("QUEUE_URL", "")  # F1: re-encolar fallidos
 
 s3 = boto3.client("s3")
+sqs = boto3.client("sqs")
 ddb = boto3.resource("dynamodb")
 table = ddb.Table(TABLE_NAME)
 
@@ -77,6 +80,8 @@ def handler(event, context):
             return create_upload(event)
         if method == "GET" and path == "/jobs":
             return list_jobs()
+        if method == "POST" and path.startswith("/jobs/") and path.endswith("/retry"):
+            return retry_failed(path[len("/jobs/"):-len("/retry")])
         if method == "GET" and path.startswith("/jobs/") and path.endswith("/report"):
             return get_report(event, path[len("/jobs/"):-len("/report")])
         if method == "GET" and path.startswith("/jobs/"):
@@ -97,20 +102,24 @@ def create_upload(event):
         + uuid.uuid4().hex[:6]
     )
     rubrica = (body.get("rubrica") or "").strip()
+    pesos = _parse_pesos(body.get("pesos"))  # F5: pesos por criterio (opcional)
     key = f"inputs/{job_id}/submissions.csv"
 
     # Guardamos la rubrica en DynamoDB (NO en metadata de S3). Asi soporta texto
     # largo, con acentos y saltos de linea sin romper la firma del presigned URL
     # ni los limites de los headers HTTP.
     now = datetime.now(timezone.utc).isoformat()
-    table.put_item(Item={
+    meta = {
         "PK": f"JOB#{job_id}",
         "SK": "META",
         "status": "PENDING_UPLOAD",
         "rubrica": rubrica,
         "createdAt": now,
         "updatedAt": now,
-    })
+    }
+    if pesos:
+        meta["pesos"] = [Decimal(str(p)) for p in pesos]
+    table.put_item(Item=meta)
 
     # Presigned URL simple: solo Content-Type, sin metadata.
     params = {"Bucket": BUCKET, "Key": key, "ContentType": "text/csv"}
@@ -219,7 +228,97 @@ def get_job(job_id):
         # descarga.
         "completed": bool(stats.get("completed")) if stats else False,
         "reportReady": bool(meta.get("report_ready")) if meta else False,
+        # F4: nº de pares de entregables sospechosamente similares (anti-copia).
+        "similarCount": int(meta.get("similar_count", 0) or 0) if meta else 0,
     })
+
+
+# --- POST /jobs/{jobId}/retry (F1) -----------------------------------------
+def retry_failed(job_id):
+    """Re-encola los entregables en FAILED del job (redrive controlado) y reabre
+    la compuerta de completion para que se regenere el reporte y la notificacion."""
+    resp = table.query(KeyConditionExpression=Key("PK").eq(f"JOB#{job_id}"))
+    items = resp.get("Items", [])
+    meta = next((i for i in items if i["SK"] == "META"), {}) or {}
+    rubrica = meta.get("rubrica", "")
+    pesos = _plain_pesos(meta.get("pesos"))
+    failed = [
+        i for i in items if i["SK"].startswith("ITEM#") and i.get("status") == "FAILED"
+    ]
+
+    now = datetime.now(timezone.utc).isoformat()
+    requeued = 0
+    for it in failed:
+        sid = it.get("id_estudiante")
+        body = json.dumps(
+            {
+                "jobId": job_id,
+                "idEstudiante": sid,
+                "texto": it.get("texto", ""),
+                "rubrica": rubrica,
+                "pesos": pesos,
+            }
+        )
+        sqs.send_message(QueueUrl=QUEUE_URL, MessageBody=body)
+        table.update_item(
+            Key={"PK": f"JOB#{job_id}", "SK": f"ITEM#{sid}"},
+            UpdateExpression="SET #s = :s, updatedAt = :t REMOVE last_error",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={":s": "PENDING", ":t": now},
+        )
+        requeued += 1
+
+    if requeued:
+        # Ajusta el contador de fallidos y reabre la compuerta: al terminar de
+        # nuevo, el Aggregator vuelve a emitir JobCompleted (reporte + email).
+        table.update_item(
+            Key={"PK": f"JOB#{job_id}", "SK": "STATS"},
+            UpdateExpression="ADD failed_count :neg REMOVE completed, completed_at",
+            ExpressionAttributeValues={":neg": Decimal(-requeued)},
+        )
+        table.update_item(
+            Key={"PK": f"JOB#{job_id}", "SK": "META"},
+            UpdateExpression="SET #s = :s, updatedAt = :t REMOVE report_ready, report_at",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={":s": "PROCESSING", ":t": now},
+        )
+
+    return _resp(200, {"requeued": requeued})
+
+
+# --- helpers de pesos (F5) -------------------------------------------------
+def _parse_pesos(raw):
+    """Acepta lista [30,20,...] o string '30,20,...'. Devuelve lista de numeros > 0 o None."""
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        raw = [p for p in raw.replace(";", ",").split(",") if p.strip()]
+    if not isinstance(raw, (list, tuple)):
+        return None
+    out = []
+    for p in raw:
+        try:
+            f = float(p)
+        except (TypeError, ValueError):
+            return None
+        if f < 0:
+            return None
+        out.append(int(f) if float(f).is_integer() else f)
+    return out or None
+
+
+def _plain_pesos(pesos):
+    """Convierte pesos (Decimals de DynamoDB) a numeros JSON-serializables."""
+    if not pesos:
+        return None
+    out = []
+    for p in pesos:
+        try:
+            f = float(p)
+        except (TypeError, ValueError):
+            return None
+        out.append(int(f) if f.is_integer() else f)
+    return out or None
 
 
 # --- GET /jobs/{jobId}/report ----------------------------------------------

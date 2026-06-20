@@ -51,6 +51,10 @@ provider:
     # --- Fase 3B: bus de eventos de dominio + notificacion al docente ---------
     BUS_NAME: ${self:service}-events-${sls:stage}
     TOPIC_ARN: !Ref NotifyTopic
+    # --- Features extra (tunables; tienen default en codigo) ------------------
+    RETRY_BASE_SECONDS: '5'     # F3: base del backoff exponencial
+    RETRY_CAP_SECONDS: '300'    # F3: tope del backoff
+    SIM_THRESHOLD: '0.6'        # F4: umbral de similitud (coseno TF-IDF)
     DEFAULT_RUBRICA: '1) Define un problema real y concreto. 2) Identifica al usuario afectado. 3) Describe el caso de uso. 4) Justifica el impacto esperado con metricas. 5) Redaccion clara y estructurada.'
 
 custom:

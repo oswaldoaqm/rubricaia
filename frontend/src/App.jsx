@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { createUpload, uploadCsv, getJob, getReport } from "./api";
+import { createUpload, uploadCsv, getJob, getReport, retryFailed } from "./api";
 
 const DEFAULT_RUBRICA = `1) Define un problema real y concreto.
 2) Identifica al usuario afectado.
@@ -56,6 +56,7 @@ export default function App() {
 
 function UploadView({ onStarted }) {
   const [rubrica, setRubrica] = useState(DEFAULT_RUBRICA);
+  const [pesosStr, setPesosStr] = useState("");
   const [file, setFile] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -66,10 +67,20 @@ function UploadView({ onStarted }) {
       setError("Selecciona un archivo CSV.");
       return;
     }
+    // F5: pesos opcionales por criterio (separados por coma).
+    const pesos = pesosStr
+      .split(",")
+      .map((p) => p.trim())
+      .filter(Boolean)
+      .map(Number);
+    if (pesos.some((p) => Number.isNaN(p) || p < 0)) {
+      setError("Los pesos deben ser números positivos separados por coma.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      const { jobId, uploadUrl, headers } = await createUpload(rubrica);
+      const { jobId, uploadUrl, headers } = await createUpload(rubrica, pesos);
       await uploadCsv(uploadUrl, headers, file);
       onStarted(jobId);
     } catch (err) {
@@ -90,6 +101,16 @@ function UploadView({ onStarted }) {
         <label>Rúbrica de evaluación</label>
         <textarea rows={6} value={rubrica} onChange={(e) => setRubrica(e.target.value)} />
 
+        <label>
+          Pesos por criterio <span className="muted small">(opcional · ej. 30,20,20,15,15)</span>
+        </label>
+        <input
+          type="text"
+          value={pesosStr}
+          placeholder="Deja vacío para ponderación equitativa"
+          onChange={(e) => setPesosStr(e.target.value)}
+        />
+
         <label>Archivo CSV</label>
         <input type="file" accept=".csv" onChange={(e) => setFile(e.target.files[0] || null)} />
         {file && <div className="filechip">📄 {file.name}</div>}
@@ -107,8 +128,23 @@ function UploadView({ onStarted }) {
 function Dashboard({ jobId, onNew }) {
   const [data, setData] = useState(null);
   const [selected, setSelected] = useState(null);
+  const [retrying, setRetrying] = useState(false);
+  const [retryNonce, setRetryNonce] = useState(0);
   const timer = useRef(null);
   const reportPolls = useRef(0);
+
+  async function doRetry() {
+    setRetrying(true);
+    try {
+      await retryFailed(jobId);
+      reportPolls.current = 0;
+      setRetryNonce((n) => n + 1); // reinicia el polling
+    } catch {
+      /* sin-op: el usuario puede reintentar */
+    } finally {
+      setRetrying(false);
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -138,7 +174,7 @@ function Dashboard({ jobId, onNew }) {
       active = false;
       if (timer.current) clearTimeout(timer.current);
     };
-  }, [jobId]);
+  }, [jobId, retryNonce]);
 
   if (!data) {
     return (
@@ -179,6 +215,25 @@ function Dashboard({ jobId, onNew }) {
           {data.failed > 0 ? ` · ${data.failed} con error` : ""} · estado {data.jobStatus}
         </div>
       </div>
+
+      {data.failed > 0 && (
+        <div className="retrybar">
+          <span>
+            ⚠️ {data.failed} entregable{data.failed > 1 ? "s" : ""} en error. Puedes
+            re-encolarlo{data.failed > 1 ? "s" : ""} sin perder datos.
+          </span>
+          <button className="btn small" disabled={retrying} onClick={doRetry}>
+            {retrying ? "Re-encolando…" : "↺ Reprocesar fallidos"}
+          </button>
+        </div>
+      )}
+
+      {data.similarCount > 0 && (
+        <div className="similalert">
+          🔍 {data.similarCount} par{data.similarCount > 1 ? "es" : ""} de entregables con
+          alta similitud (posible copia). Ver detalle en el reporte de clase.
+        </div>
+      )}
 
       {!running && <ReportBar jobId={jobId} ready={data.reportReady} />}
 

@@ -31,6 +31,7 @@ Variables de entorno:
 
 import os
 import json
+import random
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone
@@ -44,13 +45,22 @@ GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 MAX_ATTEMPTS = int(os.environ.get("MAX_ATTEMPTS", "3"))
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
+# F3: backoff adaptativo ante rate limit (segundos).
+QUEUE_URL = os.environ.get("QUEUE_URL", "")
+RETRY_BASE = float(os.environ.get("RETRY_BASE_SECONDS", "5"))
+RETRY_CAP = int(os.environ.get("RETRY_CAP_SECONDS", "300"))
+
 ddb = boto3.resource("dynamodb")
 table = ddb.Table(TABLE_NAME)
+sqs = boto3.client("sqs")
 
 
 # --- errores que SI ameritan reintento -------------------------------------
 class RetryableError(Exception):
-    pass
+    def __init__(self, message, retry_after=None):
+        super().__init__(message)
+        # Si Groq mando 'Retry-After', lo respetamos al calcular el backoff.
+        self.retry_after = retry_after
 
 
 def now_iso():
@@ -101,8 +111,12 @@ def call_groq(texto, rubrica):
         with urllib.request.urlopen(req, timeout=60) as resp:
             body = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
-        # 429 = rate limit ; 5xx = error temporal del proveedor -> reintentar
-        if e.code == 429 or e.code >= 500:
+        # 429 = rate limit: leemos 'Retry-After' del proveedor para el backoff.
+        if e.code == 429:
+            ra = e.headers.get("Retry-After") if e.headers else None
+            raise RetryableError("Groq HTTP 429 (rate limit)", retry_after=_parse_retry_after(ra))
+        # 5xx = error temporal del proveedor -> reintentar.
+        if e.code >= 500:
             raise RetryableError(f"Groq HTTP {e.code} (reintentar)")
         # 4xx (ej. 401 key mala, 400 payload) -> error permanente, no reintentar util,
         # pero lo tratamos como reintentable para no perder el dato; quedara en DLQ.
@@ -160,7 +174,7 @@ def set_done(pk, sk, result):
         Key={"PK": pk, "SK": sk},
         UpdateExpression=(
             "SET #s = :s, cumplimiento = :c, criterios = :cr, criterios_ok = :ok, "
-            "faltantes = :f, sugerencias = :g, updatedAt = :t"
+            "faltantes = :f, sugerencias = :g, metodo = :m, updatedAt = :t"
         ),
         ExpressionAttributeNames={"#s": "status"},
         ExpressionAttributeValues={
@@ -170,6 +184,7 @@ def set_done(pk, sk, result):
             ":ok": result["criterios_ok"],
             ":f": result["faltantes"],
             ":g": result["sugerencias"],
+            ":m": result.get("cumplimiento_metodo", "llm"),
             ":t": now_iso(),
         },
     )
@@ -204,7 +219,59 @@ def process_record(record):
 
     set_processing(pk, sk)
     result = call_groq(msg["texto"], msg["rubrica"])  # puede lanzar RetryableError
+    # F5: si el docente fijo pesos por criterio, el cumplimiento es ponderado.
+    cump, metodo = _apply_weights(result["criterios"], result["cumplimiento"], msg.get("pesos"))
+    result["cumplimiento"] = cump
+    result["cumplimiento_metodo"] = metodo
     set_done(pk, sk, result)
+
+
+# --- F5: cumplimiento ponderado --------------------------------------------
+def _apply_weights(criterios, llm_cumplimiento, pesos):
+    """Si hay pesos validos (uno por criterio), calcula el cumplimiento ponderado;
+    si no, usa el porcentaje holistico que devolvio el LLM."""
+    if pesos and criterios and len(pesos) == len(criterios):
+        total = sum(float(p) for p in pesos)
+        if total > 0:
+            got = sum(float(p) for c, p in zip(criterios, pesos) if c.get("cumple"))
+            return int(round(got / total * 100)), "ponderado"
+    return int(llm_cumplimiento), "llm"
+
+
+# --- F3: backoff adaptativo ------------------------------------------------
+def _parse_retry_after(value):
+    """Retry-After de Groq: aceptamos segundos; ignoramos el formato fecha HTTP."""
+    if not value:
+        return None
+    try:
+        return max(0, int(float(value)))
+    except (TypeError, ValueError):
+        return None
+
+
+def _compute_backoff(recv_count, retry_after):
+    if retry_after is not None:
+        base = float(retry_after)
+    else:
+        base = RETRY_BASE * (2 ** (recv_count - 1))  # 5, 10, 20, ...
+    jitter = random.uniform(0, RETRY_BASE)            # desincroniza reintentos en paralelo
+    return int(min(base + jitter, RETRY_CAP))
+
+
+def _delay_message(record, recv_count, retry_after):
+    """Reaparece el mensaje tras el backoff calculado (en vez del visibility fijo)."""
+    if not QUEUE_URL:
+        return
+    delay = _compute_backoff(recv_count, retry_after)
+    try:
+        sqs.change_message_visibility(
+            QueueUrl=QUEUE_URL,
+            ReceiptHandle=record["receiptHandle"],
+            VisibilityTimeout=delay,
+        )
+        print(f"Backoff: reintento {recv_count} reaparece en ~{delay}s (retry_after={retry_after})")
+    except Exception as ex:  # noqa: BLE001 - si falla, queda el visibility por defecto
+        print(f"No se pudo ajustar el visibility timeout: {ex}")
 
 
 # --- handler ---------------------------------------------------------------
@@ -223,6 +290,11 @@ def handler(event, context):
                 set_attempt_status(pk, sk, recv_count, str(e))
             except Exception:
                 pass  # si ni el body se puede leer, igual reportamos el fallo abajo
+            # F3: si aun le quedan intentos (RETRYING), aplicamos backoff adaptativo
+            # con jitter (respeta Retry-After si Groq lo mando). En el ultimo intento
+            # no tiene sentido: el mensaje ira a la DLQ.
+            if recv_count < MAX_ATTEMPTS:
+                _delay_message(record, recv_count, getattr(e, "retry_after", None))
             # Reportar este mensaje como fallido => SQS lo reentrega (o lo manda a DLQ
             # cuando se supera maxReceiveCount). El resto del lote NO se reintenta.
             batch_item_failures.append({"itemIdentifier": record["messageId"]})
