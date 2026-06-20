@@ -88,6 +88,9 @@ def call_groq(texto, rubrica):
         headers={
             "Authorization": f"Bearer {GROQ_API_KEY}",
             "Content-Type": "application/json",
+            # Groq esta detras de Cloudflare; el User-Agent por defecto de urllib
+            # ("Python-urllib/x.y") es bloqueado con error 1010. Mandamos uno normal.
+            "User-Agent": "Mozilla/5.0 (RubricaIA)",
         },
         method="POST",
     )
