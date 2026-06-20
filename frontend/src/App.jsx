@@ -29,6 +29,22 @@ const STATUS_LABEL = {
   FAILED: "Error",
 };
 
+function BrandMark() {
+  return (
+    <svg className="logomark" width="30" height="30" viewBox="0 0 30 30" fill="none" aria-hidden="true">
+      <rect x="1.5" y="1.5" width="27" height="27" rx="8" fill="#1f4d3a" />
+      <path d="M8 11h9M8 15h6" stroke="#f3eee2" strokeWidth="1.7" strokeLinecap="round" opacity="0.5" />
+      <path
+        d="M8 20.3l3.2 3 7-8.6"
+        stroke="#f3eee2"
+        strokeWidth="2.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export default function App() {
   const [user, setUser] = useState(currentUser());
 
@@ -45,7 +61,7 @@ export default function App() {
     <div className="app">
       <header className="topbar">
         <div className="brand">
-          <span className="dot" /> RúbricaIA
+          <BrandMark /> RúbricaIA
         </div>
         <div className="userbox">
           <span className="tag">{user.name || user.email}</span>
@@ -667,7 +683,7 @@ function AuthScreen({ onAuth }) {
     <div className="app">
       <header className="topbar">
         <div className="brand">
-          <span className="dot" /> RúbricaIA
+          <BrandMark /> RúbricaIA
         </div>
         <div className="tag">Revisión automática de entregables contra la rúbrica</div>
       </header>
