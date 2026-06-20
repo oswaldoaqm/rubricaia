@@ -16,6 +16,12 @@ export GROQ_MODEL="llama-3.3-70b-versatile"
 # "Confirm subscription" UNA vez (queda confirmado para siempre).
 export TEACHER_EMAIL="docente@dominio.com"
 
+# --- Plano multi-tenant: auth ---
+# Secreto para firmar los JWT (cualquier cadena larga y aleatoria; NO lo compartas).
+export JWT_SECRET="cambia-esto-por-una-cadena-larga-aleatoria"
+# Correos que entran como PROFESOR (separados por coma). El resto = estudiante.
+export TEACHER_EMAILS="oswaldo.quispe@utec.edu.pe"
+
 # --- Runtime Lambda ---
 export PY_RUNTIME="python3.12"                # si Learner Lab no lo tiene, usa python3.11
 

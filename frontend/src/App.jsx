@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { createUpload, uploadCsv, getJob, getReport, retryFailed } from "./api";
 import { filesToRows, rowsToCsv } from "./extract";
+import { currentUser, login, signup, clearToken } from "./auth";
 
 const DEFAULT_RUBRICA = `1) Define un problema real y concreto.
 2) Identifica al usuario afectado.
@@ -17,8 +18,20 @@ const STATUS_LABEL = {
 };
 
 export default function App() {
+  const [user, setUser] = useState(currentUser());
   const [view, setView] = useState("upload");
   const [jobId, setJobId] = useState(null);
+
+  if (!user) {
+    return <AuthScreen onAuth={() => setUser(currentUser())} />;
+  }
+
+  function logout() {
+    clearToken();
+    setUser(null);
+    setView("upload");
+    setJobId(null);
+  }
 
   return (
     <div className="app">
@@ -26,7 +39,13 @@ export default function App() {
         <div className="brand">
           <span className="dot" /> RúbricaIA
         </div>
-        <div className="tag">Revisión automática de entregables contra la rúbrica</div>
+        <div className="userbox">
+          <span className="tag">{user.name || user.email}</span>
+          <span className={"rolechip " + user.role}>{user.role}</span>
+          <button className="btn link" onClick={logout}>
+            salir
+          </button>
+        </div>
       </header>
 
       {view === "upload" && (
@@ -50,6 +69,90 @@ export default function App() {
 
       <footer className="foot">
         Arquitectura serverless basada en eventos · S3 → SQS → Lambda → Groq → EventBridge → SNS · AWS Learner Lab
+      </footer>
+    </div>
+  );
+}
+
+function AuthScreen({ onAuth }) {
+  const [mode, setMode] = useState("login"); // login | signup
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      if (mode === "signup") await signup(email.trim(), password, name.trim());
+      else await login(email.trim(), password);
+      onAuth();
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="app">
+      <header className="topbar">
+        <div className="brand">
+          <span className="dot" /> RúbricaIA
+        </div>
+        <div className="tag">Revisión automática de entregables contra la rúbrica</div>
+      </header>
+
+      <main className="card authcard">
+        <h2>{mode === "login" ? "Iniciar sesión" : "Crear cuenta"}</h2>
+        <p className="muted">Acceso con tu correo institucional <code>@utec.edu.pe</code>.</p>
+
+        <form onSubmit={handleSubmit}>
+          {mode === "signup" && (
+            <>
+              <label>Nombre</label>
+              <input type="text" value={name} onChange={(e) => setName(e.target.value)} />
+            </>
+          )}
+          <label>Correo</label>
+          <input
+            type="email"
+            value={email}
+            placeholder="usuario@utec.edu.pe"
+            onChange={(e) => setEmail(e.target.value)}
+          />
+          <label>Contraseña</label>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+
+          {error && <div className="error">{error}</div>}
+
+          <button className="btn primary" disabled={busy}>
+            {busy ? "…" : mode === "login" ? "Entrar" : "Registrarme"}
+          </button>
+        </form>
+
+        <p className="muted small switchmode">
+          {mode === "login" ? "¿No tienes cuenta? " : "¿Ya tienes cuenta? "}
+          <button
+            className="btn link"
+            onClick={() => {
+              setError(null);
+              setMode(mode === "login" ? "signup" : "login");
+            }}
+          >
+            {mode === "login" ? "Regístrate" : "Inicia sesión"}
+          </button>
+        </p>
+      </main>
+
+      <footer className="foot">
+        Plano de control: auth JWT · plano de datos: pipeline serverless event-driven
       </footer>
     </div>
   );

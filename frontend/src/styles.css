@@ -51,6 +51,18 @@ body {
 }
 .tag { color: var(--muted); font-size: 14px; }
 
+/* --- Auth / sesión (multi-tenant) --- */
+.userbox { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+.rolechip {
+  font-size: 12px; font-weight: 700; text-transform: capitalize;
+  padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border);
+}
+.rolechip.profesor { color: #c4b5fd; background: rgba(124, 92, 255, 0.16); border-color: rgba(124, 92, 255, 0.4); }
+.rolechip.estudiante { color: #86efac; background: rgba(47, 191, 113, 0.14); border-color: rgba(47, 191, 113, 0.4); }
+.authcard { max-width: 420px; margin: 0 auto; }
+.switchmode { text-align: center; margin-top: 16px; }
+.switchmode .btn.link { display: inline; padding: 0; }
+
 .card {
   background: var(--panel);
   border: 1px solid var(--border);

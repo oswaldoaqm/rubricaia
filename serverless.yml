@@ -55,6 +55,11 @@ provider:
     RETRY_BASE_SECONDS: '5'     # F3: base del backoff exponencial
     RETRY_CAP_SECONDS: '300'    # F3: tope del backoff
     SIM_THRESHOLD: '0.6'        # F4: umbral de similitud (coseno TF-IDF)
+    # --- Plano de control (multi-tenant): auth + LMS --------------------------
+    LMS_TABLE: ${self:service}-lms-${sls:stage}
+    JWT_SECRET: ${env:JWT_SECRET}
+    ALLOWED_DOMAIN: utec.edu.pe
+    TEACHER_EMAILS: ${env:TEACHER_EMAILS, ''}
     DEFAULT_RUBRICA: '1) Define un problema real y concreto. 2) Identifica al usuario afectado. 3) Describe el caso de uso. 4) Justifica el impacto esperado con metricas. 5) Redaccion clara y estructurada.'
 
 custom:
@@ -124,6 +129,20 @@ functions:
           batchSize: 10
           startingPosition: LATEST
 
+  # --- Auth (plano de control): signup/login + JWT ----------------------------
+  auth:
+    handler: backend/lambdas/auth/auth_lambda.handler
+    timeout: 30
+    memorySize: 256
+    package:
+      patterns:
+        - '!**'
+        - 'backend/lambdas/auth/auth_lambda.py'
+        - 'backend/common/authlib.py'
+    events:
+      - httpApi: 'POST /auth/signup'
+      - httpApi: 'POST /auth/login'
+
   # --- Report (Fase 3B): EventBridge JobCompleted -> reporte de clase a S3 -----
   # Sin 'events' aqui a proposito: el trigger EventBridge -> Report se declara en
   # 'resources' (JobCompletedRule + ReportEventsPermission), igual que el patron
@@ -158,6 +177,29 @@ resources:
         # Streams: cada cambio en un entregable dispara al Aggregator.
         StreamSpecification:
           StreamViewType: NEW_AND_OLD_IMAGES
+
+    # --- DynamoDB LMS: usuarios, clases, tareas y membresias (multi-tenant) ---
+    # Tabla separada del pipeline para no tocar lo que ya funciona. Diseño PK/SK:
+    #   USER#<email>  / PROFILE              -> cuenta (rol, hash de contraseña)
+    #   USER#<email>  / MEMBERSHIP#<classId> -> espejo: clases del alumno
+    #   CLASS#<id>    / META                 -> clase (nombre, dueño)
+    #   CLASS#<id>    / MEMBER#<email>       -> roster (estado invited/active)
+    #   CLASS#<id>    / TASK#<taskId>        -> tarea (rubrica, pesos, fecha)
+    LmsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:service}-lms-${sls:stage}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: PK
+            AttributeType: S
+          - AttributeName: SK
+            AttributeType: S
+        KeySchema:
+          - AttributeName: PK
+            KeyType: HASH
+          - AttributeName: SK
+            KeyType: RANGE
 
     # --- SQS DLQ: mensajes que agotaron sus reintentos ------------------------
     JobsDLQ:
