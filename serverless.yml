@@ -110,6 +110,7 @@ functions:
       patterns:
         - '!**'
         - 'backend/lambdas/api/api_lambda.py'
+        - 'backend/common/authlib.py'
     events:
       - httpApi: '*'
 

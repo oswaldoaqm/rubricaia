@@ -331,6 +331,14 @@ def get_detail(email, role, event):
         )
         if not me:
             return _resp(403, {"error": "No perteneces a esta clase"})
+        # F5: adjunta a cada tarea el jobId de la entrega del alumno (si ya entregó).
+        subs = table.query(
+            KeyConditionExpression=Key("PK").eq(f"USER#{email}")
+            & Key("SK").begins_with("SUBMISSION#")
+        ).get("Items", [])
+        submap = {s.get("taskId"): s.get("jobId") for s in subs}
+        for t in tasks:
+            t["submissionJobId"] = submap.get(t["taskId"])
 
     return _resp(
         200,

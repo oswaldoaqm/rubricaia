@@ -27,6 +27,7 @@ Variables de entorno:
 """
 
 import os
+import sys
 import json
 import uuid
 from datetime import datetime, timezone
@@ -35,15 +36,21 @@ from decimal import Decimal
 import boto3
 from boto3.dynamodb.conditions import Key, Attr
 
+# authlib comun (para validar el JWT en las entregas ligadas a una tarea, F5).
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "common"))
+from authlib import auth_from_event  # noqa: E402
+
 TABLE_NAME = os.environ["TABLE_NAME"]
 BUCKET = os.environ["BUCKET"]
 URL_EXPIRES = int(os.environ.get("URL_EXPIRES", "300"))
 QUEUE_URL = os.environ.get("QUEUE_URL", "")  # F1: re-encolar fallidos
+LMS_TABLE = os.environ.get("LMS_TABLE", "")  # F5: tabla del plano de control
 
 s3 = boto3.client("s3")
 sqs = boto3.client("sqs")
 ddb = boto3.resource("dynamodb")
 table = ddb.Table(TABLE_NAME)
+lms_table = ddb.Table(LMS_TABLE) if LMS_TABLE else None
 
 CORS_HEADERS = {
     "Content-Type": "application/json",
@@ -94,6 +101,40 @@ def handler(event, context):
 # --- POST /uploads ---------------------------------------------------------
 def create_upload(event):
     body = json.loads(event.get("body") or "{}")
+    class_id = (body.get("classId") or "").strip()
+    task_id = (body.get("taskId") or "").strip()
+
+    rubrica = (body.get("rubrica") or "").strip()
+    pesos = _parse_pesos(body.get("pesos"))  # ruta libre (sin tarea)
+    scope = {}
+
+    # F5: si la entrega va ligada a una tarea, la rubrica y los pesos son los de la
+    # TAREA (fuente de verdad en el plano de control); el cliente no los decide.
+    if class_id and task_id:
+        claims = auth_from_event(event)
+        if not claims:
+            return _resp(401, {"error": "no autenticado"})
+        student = claims["email"]
+        if lms_table is None:
+            return _resp(500, {"error": "LMS no configurado"})
+        member = lms_table.get_item(
+            Key={"PK": f"CLASS#{class_id}", "SK": f"MEMBER#{student}"}
+        ).get("Item")
+        if not member or member.get("status") != "active":
+            return _resp(403, {"error": "No perteneces a esta clase"})
+        task = lms_table.get_item(
+            Key={"PK": f"CLASS#{class_id}", "SK": f"TASK#{task_id}"}
+        ).get("Item")
+        if not task:
+            return _resp(404, {"error": "Tarea no encontrada"})
+        rubrica = task.get("rubrica", "") or rubrica
+        pesos = _plain_pesos(task.get("pesos"))
+        scope = {
+            "classId": class_id,
+            "taskId": task_id,
+            "studentEmail": student,
+            "taskTitle": task.get("title", ""),
+        }
 
     job_id = body.get("jobId") or (
         "job-"
@@ -101,13 +142,8 @@ def create_upload(event):
         + "-"
         + uuid.uuid4().hex[:6]
     )
-    rubrica = (body.get("rubrica") or "").strip()
-    pesos = _parse_pesos(body.get("pesos"))  # F5: pesos por criterio (opcional)
     key = f"inputs/{job_id}/submissions.csv"
 
-    # Guardamos la rubrica en DynamoDB (NO en metadata de S3). Asi soporta texto
-    # largo, con acentos y saltos de linea sin romper la firma del presigned URL
-    # ni los limites de los headers HTTP.
     now = datetime.now(timezone.utc).isoformat()
     meta = {
         "PK": f"JOB#{job_id}",
@@ -117,11 +153,24 @@ def create_upload(event):
         "createdAt": now,
         "updatedAt": now,
     }
+    meta.update(scope)
     if pesos:
         meta["pesos"] = [Decimal(str(p)) for p in pesos]
     table.put_item(Item=meta)
 
-    # Presigned URL simple: solo Content-Type, sin metadata.
+    # F5: puntero de entrega del alumno (para reabrir la tarea y ver su resultado).
+    if scope:
+        lms_table.put_item(
+            Item={
+                "PK": f"USER#{scope['studentEmail']}",
+                "SK": f"SUBMISSION#{task_id}",
+                "jobId": job_id,
+                "classId": class_id,
+                "taskId": task_id,
+                "submittedAt": now,
+            }
+        )
+
     params = {"Bucket": BUCKET, "Key": key, "ContentType": "text/csv"}
     url = s3.generate_presigned_url("put_object", Params=params, ExpiresIn=URL_EXPIRES)
     return _resp(200, {

@@ -105,6 +105,10 @@ def handler(event, context):
         }
         if existing.get("pesos") is not None:
             meta_item["pesos"] = existing["pesos"]  # preservar (no perder los pesos)
+        # F5: preservar el vinculo de la entrega con su tarea/clase/alumno.
+        for f in ("classId", "taskId", "studentEmail", "taskTitle"):
+            if existing.get(f) is not None:
+                meta_item[f] = existing[f]
         table.put_item(Item=meta_item)
 
         # 2) Crear items PENDING (batch_writer) y juntar mensajes SQS

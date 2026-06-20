@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { createUpload, uploadCsv, getJob, getReport, retryFailed } from "./api";
+import { createUpload, createTaskUpload, uploadCsv, getJob, getReport, retryFailed } from "./api";
 import { filesToRows, rowsToCsv } from "./extract";
 import { currentUser, login, signup, clearToken } from "./auth";
 import {
@@ -153,10 +153,28 @@ function StudentArea() {
 function StudentClassDetail({ classId, onBack }) {
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState(null);
+  const [openTask, setOpenTask] = useState(null);
+
+  function load() {
+    getClassDetail(classId).then(setDetail).catch((e) => setError(e.message));
+  }
 
   useEffect(() => {
-    getClassDetail(classId).then(setDetail).catch((e) => setError(e.message));
+    load();
   }, [classId]);
+
+  if (openTask) {
+    return (
+      <TaskSubmit
+        classId={classId}
+        task={openTask}
+        onBack={() => {
+          setOpenTask(null);
+          load();
+        }}
+      />
+    );
+  }
 
   return (
     <main className="card">
@@ -176,20 +194,119 @@ function StudentClassDetail({ classId, onBack }) {
           ) : (
             <ul className="tasklist">
               {detail.tasks.map((t) => (
-                <li key={t.taskId} className="taskitem">
+                <li
+                  key={t.taskId}
+                  className="taskitem clickable"
+                  onClick={() => setOpenTask(t)}
+                >
                   <div>
                     <div className="taskname">{t.title}</div>
                     <div className="muted small">
                       {t.dueDate ? "Entrega: " + t.dueDate : "Sin fecha límite"}
                     </div>
                   </div>
-                  <span className="muted small">entrega: próximo bloque</span>
+                  <span className="muted small">
+                    {t.submissionJobId ? "✓ entregado · ver" : "Entregar →"}
+                  </span>
                 </li>
               ))}
             </ul>
           )}
         </>
       )}
+    </main>
+  );
+}
+
+// F5: el alumno entrega su PDF/Word a una tarea -> pipeline -> su retroalimentación.
+function TaskSubmit({ classId, task, onBack }) {
+  const [files, setFiles] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState("");
+  const [error, setError] = useState(null);
+  const [jobId, setJobId] = useState(task.submissionJobId || null);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!files.length) {
+      setError("Sube al menos un archivo (PDF, Word o TXT).");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      setPhase("Extrayendo texto…");
+      const { rows, errors } = await filesToRows(files);
+      if (!rows.length) {
+        setError("No se pudo extraer texto." + (errors.length ? " " + errors.join(" · ") : ""));
+        setBusy(false);
+        setPhase("");
+        return;
+      }
+      // Toda tu entrega = un solo entregable (se concatenan los archivos subidos).
+      const combined = rows.map((r) => r.texto_entrega).join("\n\n").trim();
+      const me = currentUser();
+      const csv = rowsToCsv([{ id_estudiante: me.name || me.email, texto_entrega: combined }]);
+      const blob = new Blob([csv], { type: "text/csv" });
+
+      setPhase("Enviando para evaluación…");
+      const { jobId: jid, uploadUrl, headers } = await createTaskUpload(classId, task.taskId);
+      await uploadCsv(uploadUrl, headers, blob);
+      setJobId(jid);
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+      setPhase("");
+    }
+  }
+
+  if (jobId) {
+    return (
+      <main className="card">
+        <button className="btn ghost" onClick={onBack}>
+          ← Volver a la clase
+        </button>
+        <h2>{task.title}</h2>
+        <Dashboard jobId={jobId} onNew={() => setJobId(null)} />
+      </main>
+    );
+  }
+
+  return (
+    <main className="card">
+      <button className="btn ghost" onClick={onBack}>
+        ← Volver a la clase
+      </button>
+      <h2>{task.title}</h2>
+      <p className="muted">{task.dueDate ? "Entrega hasta: " + task.dueDate : "Sin fecha límite"}</p>
+
+      <div className="rubricbox">
+        <div className="ilabel">Rúbrica de esta tarea</div>
+        <pre className="rubricpre">{task.rubrica || "—"}</pre>
+      </div>
+
+      <form onSubmit={handleSubmit}>
+        <label>Tu entrega (PDF, Word .docx o TXT)</label>
+        <input
+          type="file"
+          multiple
+          accept=".pdf,.docx,.txt,.md"
+          onChange={(e) => setFiles(Array.from(e.target.files || []))}
+        />
+        {files.length > 0 && (
+          <div className="filelist">
+            {files.map((f, i) => (
+              <div key={i} className="filechip">
+                📄 {f.name}
+              </div>
+            ))}
+          </div>
+        )}
+        {error && <div className="error">{error}</div>}
+        <button className="btn primary" disabled={busy}>
+          {busy ? phase || "Procesando…" : "Enviar y evaluar"}
+        </button>
+      </form>
     </main>
   );
 }

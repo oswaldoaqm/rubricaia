@@ -1,5 +1,7 @@
 // Cliente de la API de RúbricaIA.
 // La URL del backend se inyecta en build time con VITE_API_URL (ver deploy-frontend.sh).
+import { authHeaders } from "./auth";
+
 const API = import.meta.env.VITE_API_URL;
 
 if (!API) {
@@ -19,6 +21,21 @@ export async function createUpload(rubrica, pesos) {
   });
   if (!r.ok) throw new Error(`createUpload HTTP ${r.status}`);
   return r.json(); // { jobId, uploadUrl, headers, key }
+}
+
+// 1b) Crea una entrega LIGADA A UNA TAREA (F5). La rúbrica/pesos los pone el
+// backend desde la tarea; va autenticada con el JWT del estudiante.
+export async function createTaskUpload(classId, taskId) {
+  const r = await fetch(`${API}/uploads`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ classId, taskId }),
+  });
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}));
+    throw new Error(d.error || `createTaskUpload HTTP ${r.status}`);
+  }
+  return r.json();
 }
 
 // 2) Sube el archivo CSV directo a S3 con los headers que firmo el backend.

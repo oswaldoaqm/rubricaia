@@ -177,6 +177,11 @@ main.card h3 { margin: 22px 0 6px; font-size: 16px; }
 .taskform .rowbtns { margin-top: 12px; }
 .taskform .btn.primary { margin-top: 0; }
 
+/* --- F5: caja de rúbrica en la entrega del alumno --- */
+.rubricbox { background: var(--panel2); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin: 12px 0 18px; }
+.rubricbox .ilabel { font-weight: 600; margin-bottom: 8px; color: var(--muted); }
+.rubricpre { margin: 0; white-space: pre-wrap; font-family: inherit; font-size: 14px; color: var(--text); }
+
 /* --- Fase 3B: badge "docente notificado" + barra de reporte --------------- */
 .notified {
   display: inline-block;
