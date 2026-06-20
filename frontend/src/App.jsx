@@ -10,6 +10,9 @@ import {
   inviteMember,
   removeMember,
   acceptInvite,
+  createTask,
+  updateTask,
+  deleteTask,
 } from "./lms";
 
 const DEFAULT_RUBRICA = `1) Define un problema real y concreto.
@@ -167,13 +170,23 @@ function StudentClassDetail({ classId, onBack }) {
         <>
           <h2>{detail.name}</h2>
           <p className="muted">Profesor: {detail.ownerEmail}</p>
+          <h3>Tareas</h3>
           {detail.tasks.length === 0 ? (
             <p className="muted">Aún no hay tareas en esta clase.</p>
           ) : (
-            <p className="muted">
-              {detail.tasks.length} tarea(s). La entrega por tarea se habilita en el siguiente
-              bloque.
-            </p>
+            <ul className="tasklist">
+              {detail.tasks.map((t) => (
+                <li key={t.taskId} className="taskitem">
+                  <div>
+                    <div className="taskname">{t.title}</div>
+                    <div className="muted small">
+                      {t.dueDate ? "Entrega: " + t.dueDate : "Sin fecha límite"}
+                    </div>
+                  </div>
+                  <span className="muted small">entrega: próximo bloque</span>
+                </li>
+              ))}
+            </ul>
           )}
         </>
       )}
@@ -289,12 +302,24 @@ function TeacherClassDetail({ classId, onBack }) {
   const [inviteEmail, setInviteEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [editingTask, setEditingTask] = useState(null);
 
   async function load() {
     try {
       setDetail(await getClassDetail(classId));
     } catch (e) {
       setError(e.message);
+    }
+  }
+
+  async function onDeleteTask(taskId) {
+    if (!window.confirm("¿Eliminar esta tarea?")) return;
+    setError(null);
+    try {
+      await deleteTask(classId, taskId);
+      await load();
+    } catch (err) {
+      setError(err.message);
     }
   }
 
@@ -374,13 +399,128 @@ function TeacherClassDetail({ classId, onBack }) {
             </ul>
           )}
 
-          <h3>Tareas</h3>
-          <p className="muted">
-            La gestión de tareas (rúbrica, pesos, fecha límite) se habilita en el siguiente bloque.
-          </p>
+          <h3>Tareas ({detail.tasks.length})</h3>
+          {detail.tasks.length > 0 && (
+            <ul className="tasklist">
+              {detail.tasks.map((t) => (
+                <li key={t.taskId} className="taskitem">
+                  <div>
+                    <div className="taskname">{t.title}</div>
+                    <div className="muted small">
+                      {t.dueDate ? "Entrega: " + t.dueDate : "Sin fecha límite"}
+                      {t.pesos ? " · pesos: " + t.pesos.join(",") : ""}
+                    </div>
+                  </div>
+                  <div className="rowbtns">
+                    <button className="btn small" onClick={() => setEditingTask(t)}>
+                      Editar
+                    </button>
+                    <button className="btn small danger" onClick={() => onDeleteTask(t.taskId)}>
+                      Eliminar
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <h4 className="formtitle">{editingTask ? "Editar tarea" : "Nueva tarea"}</h4>
+          <TaskForm
+            key={editingTask ? editingTask.taskId : "new"}
+            classId={classId}
+            editing={editingTask}
+            onSaved={() => {
+              setEditingTask(null);
+              load();
+            }}
+            onCancel={() => setEditingTask(null)}
+          />
         </>
       )}
     </main>
+  );
+}
+
+function TaskForm({ classId, editing, onSaved, onCancel }) {
+  const [title, setTitle] = useState(editing ? editing.title || "" : "");
+  const [rubrica, setRubrica] = useState(editing ? editing.rubrica || "" : DEFAULT_RUBRICA);
+  const [pesos, setPesos] = useState(editing && editing.pesos ? editing.pesos.join(",") : "");
+  const [dueDate, setDueDate] = useState(editing ? editing.dueDate || "" : "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  async function onSubmit(e) {
+    e.preventDefault();
+    if (!title.trim()) {
+      setError("El título es obligatorio.");
+      return;
+    }
+    const pesosArr = pesos
+      .split(",")
+      .map((p) => p.trim())
+      .filter(Boolean)
+      .map(Number);
+    if (pesosArr.some((p) => Number.isNaN(p) || p < 0)) {
+      setError("Los pesos deben ser números positivos separados por coma.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    const payload = { title: title.trim(), rubrica: rubrica.trim(), pesos: pesosArr, dueDate };
+    try {
+      if (editing) await updateTask(classId, editing.taskId, payload);
+      else await createTask(classId, payload);
+      onSaved();
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={onSubmit} className="taskform">
+      <label>Título de la tarea</label>
+      <input
+        type="text"
+        value={title}
+        placeholder="ej. Propuesta de proyecto final"
+        onChange={(e) => setTitle(e.target.value)}
+      />
+
+      <label>Rúbrica de evaluación</label>
+      <textarea rows={5} value={rubrica} onChange={(e) => setRubrica(e.target.value)} />
+
+      <div className="formrow">
+        <div>
+          <label>
+            Pesos <span className="muted small">(opcional · 30,20,20,15,15)</span>
+          </label>
+          <input
+            type="text"
+            value={pesos}
+            placeholder="vacío = equitativo"
+            onChange={(e) => setPesos(e.target.value)}
+          />
+        </div>
+        <div>
+          <label>Fecha límite</label>
+          <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+        </div>
+      </div>
+
+      {error && <div className="error">{error}</div>}
+
+      <div className="rowbtns">
+        <button className="btn primary" disabled={busy}>
+          {busy ? "…" : editing ? "Guardar cambios" : "Crear tarea"}
+        </button>
+        {editing && (
+          <button type="button" className="btn ghost" onClick={onCancel}>
+            Cancelar
+          </button>
+        )}
+      </div>
+    </form>
   );
 }
 

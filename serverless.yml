@@ -161,6 +161,9 @@ functions:
       - httpApi: 'POST /classes/remove'
       - httpApi: 'POST /classes/accept'
       - httpApi: 'GET /classes/detail'
+      - httpApi: 'POST /tasks'
+      - httpApi: 'POST /tasks/update'
+      - httpApi: 'POST /tasks/delete'
 
   # --- Report (Fase 3B): EventBridge JobCompleted -> reporte de clase a S3 -----
   # Sin 'events' aqui a proposito: el trigger EventBridge -> Report se declara en

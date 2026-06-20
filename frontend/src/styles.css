@@ -163,6 +163,20 @@ textarea:focus { outline: 2px solid var(--primary); border-color: transparent; }
 .statuschip.invited { color: #fcd34d; background: rgba(240, 164, 49, 0.14); }
 main.card h3 { margin: 22px 0 6px; font-size: 16px; }
 
+/* --- F4: tareas --- */
+.tasklist { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.taskitem {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 14px; background: var(--panel2); border: 1px solid var(--border); border-radius: 10px;
+}
+.taskname { font-weight: 600; }
+.formtitle { margin: 22px 0 8px; font-size: 15px; }
+.taskform { display: flex; flex-direction: column; gap: 4px; }
+.taskform .formrow { display: flex; gap: 14px; flex-wrap: wrap; }
+.taskform .formrow > div { flex: 1; min-width: 180px; display: flex; flex-direction: column; }
+.taskform .rowbtns { margin-top: 12px; }
+.taskform .btn.primary { margin-top: 0; }
+
 /* --- Fase 3B: badge "docente notificado" + barra de reporte --------------- */
 .notified {
   display: inline-block;

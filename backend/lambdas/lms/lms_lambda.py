@@ -27,6 +27,7 @@ import sys
 import json
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 
 import boto3
 from boto3.dynamodb.conditions import Key
@@ -79,6 +80,12 @@ def handler(event, context):
             return accept_invite(email, event)
         if method == "GET" and path.endswith("/classes/detail"):
             return get_detail(email, role, event)
+        if method == "POST" and path.endswith("/tasks/update"):
+            return update_task(email, role, event)
+        if method == "POST" and path.endswith("/tasks/delete"):
+            return delete_task(email, role, event)
+        if method == "POST" and path.endswith("/tasks"):
+            return create_task(email, role, event)
         if method == "POST" and path.endswith("/classes"):
             return create_class(email, role, event)
         if method == "GET" and path.endswith("/classes"):
@@ -336,3 +343,99 @@ def get_detail(email, role, event):
             "tasks": tasks,
         },
     )
+
+
+# --- Tareas (F4) -----------------------------------------------------------
+def _to_decimal_list(raw):
+    """Pesos -> lista de Decimal (acepta lista o string '30,20,...'). None si vacío/invalido."""
+    if not raw:
+        return None
+    if isinstance(raw, str):
+        raw = [p for p in raw.replace(";", ",").split(",") if p.strip()]
+    if not isinstance(raw, (list, tuple)):
+        return None
+    out = []
+    for p in raw:
+        try:
+            out.append(Decimal(str(float(p))))
+        except (TypeError, ValueError):
+            return None
+    return out or None
+
+
+def create_task(email, role, event):
+    if role != "profesor":
+        return _resp(403, {"error": "Solo un profesor puede crear tareas"})
+    body = json.loads(event.get("body") or "{}")
+    class_id = (body.get("classId") or "").strip()
+    _, err = _owned_class(class_id, email)
+    if err:
+        return err
+
+    title = (body.get("title") or "").strip()
+    if not title:
+        return _resp(400, {"error": "El título de la tarea es obligatorio"})
+
+    task_id = "task-" + uuid.uuid4().hex[:8]
+    item = {
+        "PK": f"CLASS#{class_id}",
+        "SK": f"TASK#{task_id}",
+        "taskId": task_id,
+        "title": title,
+        "rubrica": (body.get("rubrica") or "").strip(),
+        "dueDate": (body.get("dueDate") or "").strip(),
+        "createdAt": now_iso(),
+    }
+    pesos = _to_decimal_list(body.get("pesos"))
+    if pesos:
+        item["pesos"] = pesos
+    table.put_item(Item=item)
+    return _resp(200, {"taskId": task_id, "title": title})
+
+
+def update_task(email, role, event):
+    if role != "profesor":
+        return _resp(403, {"error": "Solo un profesor puede editar tareas"})
+    body = json.loads(event.get("body") or "{}")
+    class_id = (body.get("classId") or "").strip()
+    task_id = (body.get("taskId") or "").strip()
+    _, err = _owned_class(class_id, email)
+    if err:
+        return err
+
+    existing = table.get_item(Key={"PK": f"CLASS#{class_id}", "SK": f"TASK#{task_id}"}).get("Item")
+    if not existing:
+        return _resp(404, {"error": "Tarea no encontrada"})
+
+    title = (body.get("title") or existing.get("title") or "").strip()
+    if not title:
+        return _resp(400, {"error": "El título de la tarea es obligatorio"})
+
+    item = {
+        "PK": f"CLASS#{class_id}",
+        "SK": f"TASK#{task_id}",
+        "taskId": task_id,
+        "title": title,
+        "rubrica": body.get("rubrica", existing.get("rubrica", "")),
+        "dueDate": body.get("dueDate", existing.get("dueDate", "")),
+        "createdAt": existing.get("createdAt", now_iso()),
+        "updatedAt": now_iso(),
+    }
+    pesos = _to_decimal_list(body.get("pesos")) if "pesos" in body else existing.get("pesos")
+    if pesos:
+        item["pesos"] = pesos
+    table.put_item(Item=item)
+    return _resp(200, {"updated": task_id})
+
+
+def delete_task(email, role, event):
+    if role != "profesor":
+        return _resp(403, {"error": "Solo un profesor puede eliminar tareas"})
+    body = json.loads(event.get("body") or "{}")
+    class_id = (body.get("classId") or "").strip()
+    task_id = (body.get("taskId") or "").strip()
+    _, err = _owned_class(class_id, email)
+    if err:
+        return err
+    table.delete_item(Key={"PK": f"CLASS#{class_id}", "SK": f"TASK#{task_id}"})
+    return _resp(200, {"deleted": task_id})

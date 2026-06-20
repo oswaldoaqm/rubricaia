@@ -28,3 +28,10 @@ export const inviteMember = (classId, email) =>
 export const removeMember = (classId, email) =>
   call("/classes/remove", "POST", { classId, email });
 export const acceptInvite = (classId) => call("/classes/accept", "POST", { classId });
+
+// --- Tareas (F4) ---
+export const createTask = (classId, task) => call("/tasks", "POST", { classId, ...task });
+export const updateTask = (classId, taskId, task) =>
+  call("/tasks/update", "POST", { classId, taskId, ...task });
+export const deleteTask = (classId, taskId) =>
+  call("/tasks/delete", "POST", { classId, taskId });
