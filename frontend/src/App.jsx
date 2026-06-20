@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { createUpload, uploadCsv, getJob, getReport, retryFailed } from "./api";
+import { filesToRows, rowsToCsv } from "./extract";
 
 const DEFAULT_RUBRICA = `1) Define un problema real y concreto.
 2) Identifica al usuario afectado.
@@ -57,14 +58,15 @@ export default function App() {
 function UploadView({ onStarted }) {
   const [rubrica, setRubrica] = useState(DEFAULT_RUBRICA);
   const [pesosStr, setPesosStr] = useState("");
-  const [file, setFile] = useState(null);
+  const [files, setFiles] = useState([]);
   const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState("");
   const [error, setError] = useState(null);
 
   async function handleSubmit(e) {
     e.preventDefault();
-    if (!file) {
-      setError("Selecciona un archivo CSV.");
+    if (!files.length) {
+      setError("Selecciona al menos un archivo (PDF, Word, TXT o CSV).");
       return;
     }
     // F5: pesos opcionales por criterio (separados por coma).
@@ -80,12 +82,29 @@ function UploadView({ onStarted }) {
     setBusy(true);
     setError(null);
     try {
+      setPhase("Extrayendo texto de los archivos…");
+      const { rows, errors } = await filesToRows(files);
+      if (!rows.length) {
+        setError(
+          "No se pudo extraer texto de los archivos." +
+            (errors.length ? " " + errors.join(" · ") : "")
+        );
+        setBusy(false);
+        setPhase("");
+        return;
+      }
+      if (errors.length) setError("Algunos archivos se omitieron: " + errors.join(" · "));
+
+      setPhase(`Subiendo ${rows.length} entregable${rows.length > 1 ? "s" : ""}…`);
+      const csv = rowsToCsv(rows);
+      const blob = new Blob([csv], { type: "text/csv" });
       const { jobId, uploadUrl, headers } = await createUpload(rubrica, pesos);
-      await uploadCsv(uploadUrl, headers, file);
+      await uploadCsv(uploadUrl, headers, blob);
       onStarted(jobId);
     } catch (err) {
       setError("No se pudo iniciar el procesamiento: " + err.message);
       setBusy(false);
+      setPhase("");
     }
   }
 
@@ -93,8 +112,9 @@ function UploadView({ onStarted }) {
     <main className="card">
       <h2>Subir lote de entregables</h2>
       <p className="muted">
-        Sube un CSV con columnas <code>id_estudiante, texto_entrega</code>. Cada fila se evalúa
-        contra la rúbrica de forma asíncrona e independiente.
+        Sube los trabajos de los estudiantes en <strong>PDF, Word (.docx), TXT</strong> o un{" "}
+        <strong>CSV</strong>. Cada archivo es un entregable (un CSV se expande por filas) y se
+        evalúa contra la rúbrica de forma asíncrona e independiente.
       </p>
 
       <form onSubmit={handleSubmit}>
@@ -111,14 +131,31 @@ function UploadView({ onStarted }) {
           onChange={(e) => setPesosStr(e.target.value)}
         />
 
-        <label>Archivo CSV</label>
-        <input type="file" accept=".csv" onChange={(e) => setFile(e.target.files[0] || null)} />
-        {file && <div className="filechip">📄 {file.name}</div>}
+        <label>Entregables (PDF, Word, TXT o CSV)</label>
+        <input
+          type="file"
+          multiple
+          accept=".pdf,.docx,.txt,.md,.csv"
+          onChange={(e) => setFiles(Array.from(e.target.files || []))}
+        />
+        {files.length > 0 && (
+          <div className="filelist">
+            <div className="muted small">
+              {files.length} archivo{files.length > 1 ? "s" : ""} seleccionado
+              {files.length > 1 ? "s" : ""}
+            </div>
+            {files.map((f, i) => (
+              <div key={i} className="filechip">
+                📄 {f.name}
+              </div>
+            ))}
+          </div>
+        )}
 
         {error && <div className="error">{error}</div>}
 
         <button className="btn primary" disabled={busy}>
-          {busy ? "Subiendo…" : "Procesar lote"}
+          {busy ? phase || "Procesando…" : "Procesar lote"}
         </button>
       </form>
     </main>

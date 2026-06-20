@@ -146,6 +146,10 @@ textarea:focus { outline: 2px solid var(--primary); border-color: transparent; }
 .reportlabel { font-weight: 600; }
 .reportbtns { display: flex; gap: 8px; }
 
+/* --- Lista de archivos seleccionados --- */
+.filelist { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; max-height: 180px; overflow-y: auto; }
+.filelist .filechip { margin: 0; }
+
 /* --- F1: barra de reprocesar fallidos --- */
 .retrybar {
   display: flex;

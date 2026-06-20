@@ -4,6 +4,17 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>RúbricaIA — Revisión automática de entregables</title>
+    <!-- Extracción de texto en el navegador: PDF (pdf.js) y Word .docx (mammoth).
+         Se cargan por CDN para no inflar el bundle ni depender del worker de Vite. -->
+    <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
+    <script>
+      // El worker de pdf.js debe apuntarse explícitamente.
+      if (window.pdfjsLib) {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+          "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
