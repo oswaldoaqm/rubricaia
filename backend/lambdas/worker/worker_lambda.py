@@ -60,14 +60,16 @@ def now_iso():
 # --- llamada a Groq (stdlib, sin librerias externas) -----------------------
 def call_groq(texto, rubrica):
     system_prompt = (
-        "Eres un evaluador academico estricto. Recibes la RUBRICA y el TEXTO de "
-        "un entregable de un estudiante. Evalua que tan bien el texto cumple la "
-        "rubrica. Responde UNICAMENTE un objeto JSON valido con EXACTAMENTE estas "
-        "claves:\n"
+        "Eres un evaluador academico estricto. Recibes una RUBRICA (lista de "
+        "criterios) y el TEXTO de un entregable de un estudiante. Evalualo "
+        "CRITERIO POR CRITERIO. Responde UNICAMENTE un objeto JSON valido con "
+        "EXACTAMENTE estas claves:\n"
         '  "cumplimiento": entero 0-100 (porcentaje global de cumplimiento),\n'
-        '  "criterios_ok": lista de strings (lo que SI cumple),\n'
-        '  "faltantes": lista de strings (lo que falta),\n'
-        '  "sugerencias": lista de strings accionables y concretas.\n'
+        '  "criterios": lista de objetos, UNO POR CADA criterio de la rubrica, con:\n'
+        '      "criterio": texto breve del criterio evaluado,\n'
+        '      "cumple": true o false,\n'
+        '      "evidencia": cita o explicacion breve del texto que lo justifica,\n'
+        '      "sugerencia": accion concreta para mejorar (cadena vacia si ya cumple).\n'
         "No agregues texto fuera del JSON."
     )
     user_prompt = f"RUBRICA:\n{rubrica}\n\nTEXTO DEL ENTREGABLE:\n{texto}"
@@ -114,11 +116,27 @@ def call_groq(texto, rubrica):
     except (KeyError, IndexError, json.JSONDecodeError) as e:
         raise RetryableError(f"Respuesta de Groq no parseable: {e}")
 
+    # Normalizamos la evaluacion por criterio y derivamos las listas de resumen
+    # (compatibilidad hacia atras con el frontend actual).
+    criterios = []
+    for c in result.get("criterios", []):
+        if not isinstance(c, dict):
+            continue
+        criterios.append({
+            "criterio": str(c.get("criterio", "")),
+            "cumple": bool(c.get("cumple", False)),
+            "evidencia": str(c.get("evidencia", "")),
+            "sugerencia": str(c.get("sugerencia", "")),
+        })
+
     return {
         "cumplimiento": int(result.get("cumplimiento", 0)),
-        "criterios_ok": [str(x) for x in result.get("criterios_ok", [])],
-        "faltantes": [str(x) for x in result.get("faltantes", [])],
-        "sugerencias": [str(x) for x in result.get("sugerencias", [])],
+        "criterios": criterios,
+        "criterios_ok": [c["criterio"] for c in criterios if c["cumple"]],
+        "faltantes": [c["criterio"] for c in criterios if not c["cumple"]],
+        "sugerencias": [
+            c["sugerencia"] for c in criterios if c["sugerencia"] and not c["cumple"]
+        ],
     }
 
 
@@ -141,13 +159,14 @@ def set_done(pk, sk, result):
     table.update_item(
         Key={"PK": pk, "SK": sk},
         UpdateExpression=(
-            "SET #s = :s, cumplimiento = :c, criterios_ok = :ok, "
+            "SET #s = :s, cumplimiento = :c, criterios = :cr, criterios_ok = :ok, "
             "faltantes = :f, sugerencias = :g, updatedAt = :t"
         ),
         ExpressionAttributeNames={"#s": "status"},
         ExpressionAttributeValues={
             ":s": "DONE",
             ":c": Decimal(str(result["cumplimiento"])),
+            ":cr": result["criterios"],
             ":ok": result["criterios_ok"],
             ":f": result["faltantes"],
             ":g": result["sugerencias"],

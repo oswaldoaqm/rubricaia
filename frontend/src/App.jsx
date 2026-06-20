@@ -165,6 +165,8 @@ function Dashboard({ jobId, onNew }) {
         </div>
       </div>
 
+      {data.insights && <InsightsPanel insights={data.insights} />}
+
       <table className="grid">
         <thead>
           <tr>
@@ -208,6 +210,58 @@ function Dashboard({ jobId, onNew }) {
   );
 }
 
+function InsightsPanel({ insights }) {
+  if (!insights || !insights.evaluados) return null;
+  const d = insights.distribucion;
+  const total = d.low + d.mid + d.high || 1;
+  const top = (insights.criterios_fallados || []).slice(0, 5);
+
+  return (
+    <div className="insights">
+      <div className="insightcards">
+        <div className="icard">
+          <div className="inum">{insights.promedio}%</div>
+          <div className="ilabel">Promedio de la clase</div>
+        </div>
+        <div className="icard">
+          <div className="inum">{insights.evaluados}</div>
+          <div className="ilabel">Entregables evaluados</div>
+        </div>
+        <div className="icard wide">
+          <div className="ilabel">Distribución de cumplimiento</div>
+          <div className="distbar">
+            <span className="seg bad" style={{ width: (d.low / total) * 100 + "%" }} />
+            <span className="seg mid" style={{ width: (d.mid / total) * 100 + "%" }} />
+            <span className="seg good" style={{ width: (d.high / total) * 100 + "%" }} />
+          </div>
+          <div className="distlegend">
+            <span><i className="ldot bad" /> Bajo &lt;40% ({d.low})</span>
+            <span><i className="ldot mid" /> 40–70% ({d.mid})</span>
+            <span><i className="ldot good" /> Alto ≥70% ({d.high})</span>
+          </div>
+        </div>
+      </div>
+
+      {top.length > 0 && (
+        <div className="topfail">
+          <div className="ilabel">Criterios más fallados de la clase</div>
+          <ul className="faillist">
+            {top.map((f, i) => (
+              <li key={i}>
+                <span className="failname">{f.criterio}</span>
+                <span className="failbar">
+                  <span style={{ width: (f.count / insights.evaluados) * 100 + "%" }} />
+                </span>
+                <span className="failcount">{f.count}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CumpBar({ v }) {
   const kind = v >= 70 ? "good" : v >= 40 ? "mid" : "bad";
   return (
@@ -221,6 +275,7 @@ function CumpBar({ v }) {
 }
 
 function Detail({ r, onClose }) {
+  const hasCriterios = r.criterios && r.criterios.length > 0;
   return (
     <div className="modalbg" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -232,9 +287,29 @@ function Detail({ r, onClose }) {
             ×
           </button>
         </div>
-        <Section title="✓ Criterios cumplidos" items={r.criterios_ok} kind="ok" />
-        <Section title="✗ Faltantes" items={r.faltantes} kind="bad" />
-        <Section title="→ Sugerencias" items={r.sugerencias} kind="sug" />
+
+        {hasCriterios ? (
+          <div className="criterios">
+            {r.criterios.map((c, i) => (
+              <div key={i} className={"crit " + (c.cumple ? "ok" : "bad")}>
+                <div className="crithead">
+                  <span className="critmark">{c.cumple ? "✓" : "✗"}</span>
+                  <span className="crittitle">{c.criterio}</span>
+                </div>
+                {c.evidencia && <div className="critev">{c.evidencia}</div>}
+                {!c.cumple && c.sugerencia && (
+                  <div className="critsug">→ {c.sugerencia}</div>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <>
+            <Section title="✓ Criterios cumplidos" items={r.criterios_ok} kind="ok" />
+            <Section title="✗ Faltantes" items={r.faltantes} kind="bad" />
+            <Section title="→ Sugerencias" items={r.sugerencias} kind="sug" />
+          </>
+        )}
       </div>
     </div>
   );

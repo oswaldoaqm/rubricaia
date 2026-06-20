@@ -146,6 +146,8 @@ def get_job(job_id):
 
     meta = next((i for i in items if i["SK"] == "META"), None)
     entregables = [i for i in items if i["SK"].startswith("ITEM#")]
+    stats = next((i for i in items if i["SK"] == "STATS"), None)
+    fails = [i for i in items if i["SK"].startswith("FAIL#")]
 
     counts = {}
     for e in entregables:
@@ -163,6 +165,7 @@ def get_job(job_id):
             "id_estudiante": e.get("id_estudiante"),
             "status": e.get("status"),
             "cumplimiento": e.get("cumplimiento"),
+            "criterios": e.get("criterios", []),
             "criterios_ok": e.get("criterios_ok", []),
             "faltantes": e.get("faltantes", []),
             "sugerencias": e.get("sugerencias", []),
@@ -173,6 +176,31 @@ def get_job(job_id):
     ]
     results.sort(key=lambda x: x.get("id_estudiante") or "")
 
+    # Insights de la clase (los mantiene el Aggregator via DynamoDB Streams).
+    insights = None
+    if stats:
+        dc = int(stats.get("done_count", 0) or 0)
+        csum = int(stats.get("cumplimiento_sum", 0) or 0)
+        insights = {
+            "evaluados": dc,
+            "promedio": round(csum / dc) if dc else 0,
+            "distribucion": {
+                "low": int(stats.get("dist_low", 0) or 0),
+                "mid": int(stats.get("dist_mid", 0) or 0),
+                "high": int(stats.get("dist_high", 0) or 0),
+            },
+            "criterios_fallados": sorted(
+                [
+                    {
+                        "criterio": f.get("criterio", f["SK"][5:]),
+                        "count": int(f.get("fail_count", 0) or 0),
+                    }
+                    for f in fails
+                ],
+                key=lambda x: -x["count"],
+            ),
+        }
+
     return _resp(200, {
         "jobId": job_id,
         "jobStatus": job_status,
@@ -180,5 +208,6 @@ def get_job(job_id):
         "done": done,
         "failed": failed,
         "counts": counts,
+        "insights": insights,
         "results": results,
     })

@@ -105,6 +105,22 @@ functions:
     events:
       - httpApi: '*'
 
+  # --- Aggregator: DynamoDB Streams -> estadisticas de la clase en vivo --------
+  aggregator:
+    handler: backend/lambdas/aggregator/aggregator_lambda.handler
+    timeout: 30
+    memorySize: 256
+    package:
+      patterns:
+        - '!**'
+        - 'backend/lambdas/aggregator/aggregator_lambda.py'
+    events:
+      - stream:
+          type: dynamodb
+          arn: !GetAtt JobsTable.StreamArn
+          batchSize: 10
+          startingPosition: LATEST
+
 resources:
   Resources:
     # --- DynamoDB: estado y resultados por entregable -------------------------
@@ -123,6 +139,9 @@ resources:
             KeyType: HASH
           - AttributeName: SK
             KeyType: RANGE
+        # Streams: cada cambio en un entregable dispara al Aggregator.
+        StreamSpecification:
+          StreamViewType: NEW_AND_OLD_IMAGES
 
     # --- SQS DLQ: mensajes que agotaron sus reintentos ------------------------
     JobsDLQ:
