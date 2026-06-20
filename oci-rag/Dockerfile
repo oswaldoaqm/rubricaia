@@ -4,8 +4,12 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Dependencias del sistema mínimas para onnxruntime (lo usa FastEmbed).
-RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 \
+# Dependencias del sistema:
+#  - libgomp1: runtime de onnxruntime (lo usa FastEmbed).
+#  - build-essential: compilador C. FastEmbed depende de PyStemmer, que en ARM
+#    no trae wheel precompilado y se compila desde fuente (necesita gcc).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libgomp1 build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
