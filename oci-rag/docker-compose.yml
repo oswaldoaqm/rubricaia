@@ -1,0 +1,31 @@
+# RúbricaIA - stack RAG para la VM de OCI (multinube).
+# Levanta Qdrant (base vectorial, interna) + el servicio RAG (FastEmbed) que
+# expone el puerto 8000 al exterior. Solo 8000 se publica; Qdrant queda en la
+# red interna del compose.
+#
+# Uso en la VM (Oracle Linux; docker = podman):
+#   docker compose up -d --build      (o: podman compose up -d --build)
+# Verificar:
+#   curl http://localhost:8000/health
+
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    restart: unless-stopped
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  rag:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      EMBED_MODEL: intfloat/multilingual-e5-small
+      COLLECTION: rubricaia
+    depends_on:
+      - qdrant
+
+volumes:
+  qdrant_data:

@@ -50,6 +50,10 @@ QUEUE_URL = os.environ.get("QUEUE_URL", "")
 RETRY_BASE = float(os.environ.get("RETRY_BASE_SECONDS", "5"))
 RETRY_CAP = int(os.environ.get("RETRY_CAP_SECONDS", "300"))
 
+# G2: servicio RAG en OCI (multinube). Si RAG_URL está vacío, se evalúa sin RAG.
+RAG_URL = os.environ.get("RAG_URL", "").rstrip("/")
+RAG_TIMEOUT = float(os.environ.get("RAG_TIMEOUT", "5"))
+
 ddb = boto3.resource("dynamodb")
 table = ddb.Table(TABLE_NAME)
 sqs = boto3.client("sqs")
@@ -67,8 +71,30 @@ def now_iso():
     return datetime.now(timezone.utc).isoformat()
 
 
+# --- G2: recuperacion de contexto desde el servicio RAG en OCI (multinube) -
+def _retrieve_context(texto):
+    """Best-effort: si no hay RAG_URL o el servicio en OCI falla/responde lento,
+    devuelve [] y la evaluacion sigue sin RAG (degradacion elegante)."""
+    if not RAG_URL:
+        return []
+    try:
+        data = json.dumps({"text": texto[:2000], "k": 3}).encode("utf-8")
+        req = urllib.request.Request(
+            f"{RAG_URL}/retrieve",
+            data=data,
+            headers={"Content-Type": "application/json", "User-Agent": "RubricaIA-Worker"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=RAG_TIMEOUT) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+        return [c for c in body.get("contexts", []) if c]
+    except Exception as e:  # noqa: BLE001
+        print(f"RAG no disponible, se evalua sin contexto: {e}")
+        return []
+
+
 # --- llamada a Groq (stdlib, sin librerias externas) -----------------------
-def call_groq(texto, rubrica):
+def call_groq(texto, rubrica, contexts=None):
     system_prompt = (
         "Eres un evaluador academico estricto. Recibes una RUBRICA (lista de "
         "criterios) y el TEXTO de un entregable de un estudiante. Evalualo "
@@ -82,7 +108,15 @@ def call_groq(texto, rubrica):
         '      "sugerencia": accion concreta para mejorar (cadena vacia si ya cumple).\n'
         "No agregues texto fuera del JSON."
     )
-    user_prompt = f"RUBRICA:\n{rubrica}\n\nTEXTO DEL ENTREGABLE:\n{texto}"
+    # G2: material del curso recuperado por RAG (si lo hay) para calibrar el juicio.
+    contexto_str = ""
+    if contexts:
+        contexto_str = (
+            "MATERIAL DE REFERENCIA DEL CURSO (usalo para calibrar tu evaluacion):\n- "
+            + "\n- ".join(contexts)
+            + "\n\n"
+        )
+    user_prompt = f"{contexto_str}RUBRICA:\n{rubrica}\n\nTEXTO DEL ENTREGABLE:\n{texto}"
 
     payload = {
         "model": GROQ_MODEL,
@@ -218,7 +252,8 @@ def process_record(record):
         return
 
     set_processing(pk, sk)
-    result = call_groq(msg["texto"], msg["rubrica"])  # puede lanzar RetryableError
+    contexts = _retrieve_context(msg["texto"])  # G2: RAG multinube (best-effort)
+    result = call_groq(msg["texto"], msg["rubrica"], contexts)  # puede lanzar RetryableError
     # F5: si el docente fijo pesos por criterio, el cumplimiento es ponderado.
     cump, metodo = _apply_weights(result["criterios"], result["cumplimiento"], msg.get("pesos"))
     result["cumplimiento"] = cump

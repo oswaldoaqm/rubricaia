@@ -55,6 +55,7 @@ provider:
     RETRY_BASE_SECONDS: '5'     # F3: base del backoff exponencial
     RETRY_CAP_SECONDS: '300'    # F3: tope del backoff
     SIM_THRESHOLD: '0.6'        # F4: umbral de similitud (coseno TF-IDF)
+    RAG_URL: ${env:RAG_URL, ''} # G2: servicio RAG en OCI (multinube); vacío = sin RAG
     # --- Plano de control (multi-tenant): auth + LMS --------------------------
     LMS_TABLE: ${self:service}-lms-${sls:stage}
     JWT_SECRET: ${env:JWT_SECRET}
