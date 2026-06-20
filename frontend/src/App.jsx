@@ -2,7 +2,15 @@ import { useState, useEffect, useRef } from "react";
 import { createUpload, uploadCsv, getJob, getReport, retryFailed } from "./api";
 import { filesToRows, rowsToCsv } from "./extract";
 import { currentUser, login, signup, clearToken } from "./auth";
-import { listClasses, createClass, deleteClass } from "./lms";
+import {
+  listClasses,
+  createClass,
+  deleteClass,
+  getClassDetail,
+  inviteMember,
+  removeMember,
+  acceptInvite,
+} from "./lms";
 
 const DEFAULT_RUBRICA = `1) Define un problema real y concreto.
 2) Identifica al usuario afectado.
