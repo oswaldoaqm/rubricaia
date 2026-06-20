@@ -67,13 +67,8 @@ functions:
       patterns:
         - '!**'
         - 'backend/lambdas/splitter/splitter_lambda.py'
-    events:
-      - s3:
-          bucket: ${self:custom.bucketName}
-          event: s3:ObjectCreated:*
-          rules:
-            - prefix: inputs/
-            - suffix: .csv
+    # Sin 'events' aqui a proposito: el trigger S3 -> Splitter se define en
+    # 'resources' (InputsBucket) para poder declarar tambien el CORS del bucket.
 
   # --- Worker: SQS -> Groq -> DynamoDB (con reintentos/DLQ) --------------------
   worker:
@@ -159,6 +154,43 @@ resources:
         RedrivePolicy:
           deadLetterTargetArn: !GetAtt JobsDLQ.Arn
           maxReceiveCount: 3
+
+    # --- S3: bucket de entrada con CORS + trigger al Splitter ----------------
+    # Permiso para que S3 pueda invocar al Splitter (debe existir antes que la
+    # notificacion del bucket, por eso el DependsOn).
+    SplitterS3Permission:
+      Type: AWS::Lambda::Permission
+      Properties:
+        FunctionName: !GetAtt SplitterLambdaFunction.Arn
+        Action: lambda:InvokeFunction
+        Principal: s3.amazonaws.com
+        SourceAccount: ${aws:accountId}
+        SourceArn: arn:aws:s3:::${self:custom.bucketName}
+
+    InputsBucket:
+      Type: AWS::S3::Bucket
+      DependsOn: SplitterS3Permission
+      Properties:
+        BucketName: ${self:custom.bucketName}
+        # CORS: el navegador sube el CSV con presigned URL (PUT) desde Amplify.
+        CorsConfiguration:
+          CorsRules:
+            - AllowedOrigins: ['*']
+              AllowedMethods: [PUT, GET, HEAD]
+              AllowedHeaders: ['*']
+              ExposedHeaders: [ETag]
+        # Trigger: cada CSV nuevo en inputs/ dispara al Splitter.
+        NotificationConfiguration:
+          LambdaConfigurations:
+            - Event: s3:ObjectCreated:*
+              Filter:
+                S3Key:
+                  Rules:
+                    - Name: prefix
+                      Value: inputs/
+                    - Name: suffix
+                      Value: .csv
+              Function: !GetAtt SplitterLambdaFunction.Arn
 
   Outputs:
     BucketName:
