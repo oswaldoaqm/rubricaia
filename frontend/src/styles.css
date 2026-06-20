@@ -129,6 +129,18 @@ textarea:focus { outline: 2px solid var(--primary); border-color: transparent; }
 .btn.link { background: none; color: var(--primary); padding: 4px 0; }
 .btn.small { padding: 7px 13px; font-size: 13px; background: var(--panel2); color: var(--text); border: 1px solid var(--border); }
 .btn.small:disabled { opacity: 0.55; cursor: default; }
+.btn.danger { color: #fca5a5; border-color: rgba(229, 82, 75, 0.45); background: rgba(229, 82, 75, 0.10); }
+
+/* --- F2: gestión de clases --- */
+.inlineform { display: flex; gap: 10px; margin: 8px 0 4px; flex-wrap: wrap; }
+.inlineform input { flex: 1; min-width: 220px; }
+.inlineform .btn.primary { margin-top: 0; }
+.classlist { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.classitem {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 14px 16px; background: var(--panel2); border: 1px solid var(--border); border-radius: 12px;
+}
+.classname { font-weight: 600; font-size: 15px; }
 
 /* --- Fase 3B: badge "docente notificado" + barra de reporte --------------- */
 .notified {

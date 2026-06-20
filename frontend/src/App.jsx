@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { createUpload, uploadCsv, getJob, getReport, retryFailed } from "./api";
 import { filesToRows, rowsToCsv } from "./extract";
 import { currentUser, login, signup, clearToken } from "./auth";
+import { listClasses, createClass, deleteClass } from "./lms";
 
 const DEFAULT_RUBRICA = `1) Define un problema real y concreto.
 2) Identifica al usuario afectado.
@@ -19,8 +20,6 @@ const STATUS_LABEL = {
 
 export default function App() {
   const [user, setUser] = useState(currentUser());
-  const [view, setView] = useState("upload");
-  const [jobId, setJobId] = useState(null);
 
   if (!user) {
     return <AuthScreen onAuth={() => setUser(currentUser())} />;
@@ -29,8 +28,6 @@ export default function App() {
   function logout() {
     clearToken();
     setUser(null);
-    setView("upload");
-    setJobId(null);
   }
 
   return (
@@ -48,29 +45,128 @@ export default function App() {
         </div>
       </header>
 
-      {view === "upload" && (
-        <UploadView
-          onStarted={(id) => {
-            setJobId(id);
-            setView("dashboard");
-          }}
-        />
-      )}
-
-      {view === "dashboard" && (
-        <Dashboard
-          jobId={jobId}
-          onNew={() => {
-            setView("upload");
-            setJobId(null);
-          }}
-        />
-      )}
+      {user.role === "profesor" ? <TeacherClasses /> : <StudentArea />}
 
       <footer className="foot">
         Arquitectura serverless basada en eventos · S3 → SQS → Lambda → Groq → EventBridge → SNS · AWS Learner Lab
       </footer>
     </div>
+  );
+}
+
+// Área del estudiante: por ahora mantiene el flujo de subida directo.
+// En F5 se moverá dentro de las tareas de cada clase.
+function StudentArea() {
+  const [view, setView] = useState("upload");
+  const [jobId, setJobId] = useState(null);
+
+  return view === "upload" ? (
+    <UploadView
+      onStarted={(id) => {
+        setJobId(id);
+        setView("dashboard");
+      }}
+    />
+  ) : (
+    <Dashboard
+      jobId={jobId}
+      onNew={() => {
+        setView("upload");
+        setJobId(null);
+      }}
+    />
+  );
+}
+
+// Área del profesor (F2): gestión de clases.
+function TeacherClasses() {
+  const [classes, setClasses] = useState(null);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  async function load() {
+    try {
+      const d = await listClasses();
+      setClasses(d.classes || []);
+    } catch (e) {
+      setError(e.message);
+      setClasses([]);
+    }
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  async function onCreate(e) {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await createClass(name.trim());
+      setName("");
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onDelete(classId) {
+    if (!window.confirm("¿Eliminar esta clase? Se borrarán sus tareas y miembros.")) return;
+    setError(null);
+    try {
+      await deleteClass(classId);
+      await load();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  return (
+    <main className="card">
+      <h2>Mis clases</h2>
+      <p className="muted">
+        Crea y gestiona tus clases. Luego podrás invitar estudiantes y crear tareas con su rúbrica.
+      </p>
+
+      <form onSubmit={onCreate} className="inlineform">
+        <input
+          type="text"
+          value={name}
+          placeholder="Nombre de la clase (ej. Cloud Computing 2026-1)"
+          onChange={(e) => setName(e.target.value)}
+        />
+        <button className="btn primary" disabled={busy}>
+          {busy ? "…" : "Crear clase"}
+        </button>
+      </form>
+
+      {error && <div className="error">{error}</div>}
+
+      {classes === null ? (
+        <p className="muted">Cargando…</p>
+      ) : classes.length === 0 ? (
+        <p className="muted">Aún no tienes clases. Crea la primera arriba.</p>
+      ) : (
+        <ul className="classlist">
+          {classes.map((c) => (
+            <li key={c.classId} className="classitem">
+              <div>
+                <div className="classname">{c.name}</div>
+                <div className="muted small mono">{c.classId}</div>
+              </div>
+              <button className="btn small danger" onClick={() => onDelete(c.classId)}>
+                Eliminar
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </main>
   );
 }
 

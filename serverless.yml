@@ -143,6 +143,21 @@ functions:
       - httpApi: 'POST /auth/signup'
       - httpApi: 'POST /auth/login'
 
+  # --- LMS (plano de control): clases, membresias y tareas --------------------
+  lms:
+    handler: backend/lambdas/lms/lms_lambda.handler
+    timeout: 30
+    memorySize: 256
+    package:
+      patterns:
+        - '!**'
+        - 'backend/lambdas/lms/lms_lambda.py'
+        - 'backend/common/authlib.py'
+    events:
+      - httpApi: 'POST /classes'
+      - httpApi: 'GET /classes'
+      - httpApi: 'POST /classes/delete'
+
   # --- Report (Fase 3B): EventBridge JobCompleted -> reporte de clase a S3 -----
   # Sin 'events' aqui a proposito: el trigger EventBridge -> Report se declara en
   # 'resources' (JobCompletedRule + ReportEventsPermission), igual que el patron
