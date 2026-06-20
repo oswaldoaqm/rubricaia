@@ -13,20 +13,7 @@ Resiliencia (rúbrica criterio 3):
   - Se usa ReportBatchItemFailures: solo se reintenta el mensaje que falla,
     no todo el lote.
 
-Despliegue (AWS Learner Lab):
-  - Runtime  : python3.12
-  - Handler  : worker_lambda.handler
-  - Role     : LabRole
-  - Sin dependencias externas: solo stdlib + boto3 (ya incluido en el runtime).
-    => se sube como un .zip con solo este archivo.
-  - Reserved concurrency: 3-5  (controla cuantas llamadas simultaneas a Groq -> evita rate limit)
-  - Trigger SQS: batchSize 5, "Report batch item failures" ACTIVADO.
-
-Variables de entorno:
-  TABLE_NAME      = rubricaia
-  GROQ_API_KEY    = gsk_...            (tu key de https://console.groq.com/keys)
-  GROQ_MODEL      = llama-3.3-70b-versatile   (opcional)
-  MAX_ATTEMPTS    = 3                  (opcional)
+Sin dependencias externas: stdlib + boto3 (Groq se llama con urllib).
 """
 
 import os
@@ -96,17 +83,20 @@ def _retrieve_context(texto):
 # --- llamada a Groq (stdlib, sin librerias externas) -----------------------
 def call_groq(texto, rubrica, contexts=None):
     system_prompt = (
-        "Eres un evaluador academico estricto. Recibes una RUBRICA (lista de "
-        "criterios) y el TEXTO de un entregable de un estudiante. Evalualo "
-        "CRITERIO POR CRITERIO. Responde UNICAMENTE un objeto JSON valido con "
-        "EXACTAMENTE estas claves:\n"
-        '  "cumplimiento": entero 0-100 (porcentaje global de cumplimiento),\n'
-        '  "criterios": lista de objetos, UNO POR CADA criterio de la rubrica, con:\n'
-        '      "criterio": texto breve del criterio evaluado,\n'
+        "Eres un evaluador academico estricto y consistente. Recibes una RUBRICA "
+        "(lista numerada de criterios) y el TEXTO del entregable de un estudiante. "
+        "Evalua el texto contra CADA criterio de la rubrica, devolviendo el MISMO "
+        "NUMERO de criterios que la rubrica y EN EL MISMO ORDEN (ni mas ni menos). "
+        "Marca cumple=true SOLO si el texto satisface el criterio de forma clara y "
+        "explicita; si falta, es vago o ambiguo, marca cumple=false. "
+        "Responde UNICAMENTE un objeto JSON valido con EXACTAMENTE estas claves:\n"
+        '  "cumplimiento": entero 0-100 (porcentaje global; referencial),\n'
+        '  "criterios": lista con UN objeto POR CADA criterio de la rubrica, EN ORDEN:\n'
+        '      "criterio": el criterio evaluado (parafraseado breve),\n'
         '      "cumple": true o false,\n'
-        '      "evidencia": cita o explicacion breve del texto que lo justifica,\n'
-        '      "sugerencia": accion concreta para mejorar (cadena vacia si ya cumple).\n'
-        "No agregues texto fuera del JSON."
+        '      "evidencia": cita breve del texto que justifica la decision (o por que falta),\n'
+        '      "sugerencia": accion concreta para cumplirlo (cadena vacia si ya cumple).\n'
+        "No incluyas explicaciones ni texto fuera del JSON."
     )
     # G2: material del curso recuperado por RAG (si lo hay) para calibrar el juicio.
     contexto_str = ""

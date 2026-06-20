@@ -16,14 +16,6 @@ Salida en S3 (mismo bucket de entrada, prefijo reports/):
   reports/<jobId>/report.json   (maquina / reproducibilidad)
   reports/<jobId>/report.csv    (el docente lo abre en Excel)
   reports/<jobId>/report.html   (reporte visual autocontenido)
-
-Despliegue (Serverless Framework):
-  - Runtime : python3.12 / Handler: report_lambda.handler / Role: LabRole
-  - Evento  : EventBridge rule (ver serverless.yml: JobCompletedRule)
-
-Variables de entorno:
-  TABLE_NAME = rubricaia-<stage>
-  BUCKET     = rubricaia-inputs-<acct>-<stage>
 """
 
 import os

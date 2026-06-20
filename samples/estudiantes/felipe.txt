@@ -1,0 +1,9 @@
+Propuesta de proyecto: Ahorro de energia en aulas del campus
+
+Introduccion: A continuacion presento mi propuesta de proyecto de innovacion, organizada en problema, usuario, solucion e impacto.
+
+Problema. El problema es el consumo innecesario de energia en aulas vacias. Una auditoria de una semana detecto que el 30% del tiempo las luces y proyectores quedan encendidos en aulas sin clase.
+
+Impacto esperado. Esperamos reducir el consumo electrico de aulas en un 22% en seis meses, medido con los medidores por edificio, equivalente a un ahorro estimado de 18 mil soles anuales.
+
+Conclusion: la propuesta atiende una necesidad concreta de la comunidad y plantea una solucion viable con impacto medible.

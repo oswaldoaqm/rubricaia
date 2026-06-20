@@ -23,14 +23,6 @@ Fase 3B - cierre del ciclo por eventos:
   La emision unica se garantiza con una escritura condicional sobre STATS
   (attribute_not_exists(completed)): aunque el stream reentregue, el evento sale
   una sola vez.
-
-Despliegue (Serverless Framework):
-  - Runtime : python3.12 / Handler: aggregator_lambda.handler / Role: LabRole
-  - Evento  : stream dynamodb (ver serverless.yml)
-
-Variables de entorno:
-  TABLE_NAME = rubricaia-<stage>
-  BUS_NAME   = rubricaia-events-<stage>   (bus de EventBridge; Fase 3B)
 """
 
 import os

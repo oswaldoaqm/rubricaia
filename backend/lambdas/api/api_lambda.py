@@ -12,18 +12,6 @@ Endpoints:
   GET  /jobs/{jobId}/report   -> presigned URL de descarga del reporte (Fase 3B)
                                  ?format=html|csv|json (default html)
   POST /jobs/{jobId}/retry    -> re-encola los entregables en FAILED (F1)
-
-Despliegue (AWS Learner Lab):
-  - Runtime  : python3.12
-  - Handler  : api_lambda.handler
-  - Role     : LabRole
-  - Sin dependencias externas (stdlib + boto3).
-  - Integracion API Gateway HTTP API (proxy), CORS abierto (demo).
-
-Variables de entorno:
-  TABLE_NAME    = rubricaia
-  BUCKET        = rubricaia-inputs-<accountId>
-  URL_EXPIRES   = 300            (segundos de validez del presigned URL, opcional)
 """
 
 import os

@@ -11,19 +11,6 @@ Flujo:
     -> DynamoDB: JOB#<jobId> / META   (status PROCESSING, total = nº filas)
     -> DynamoDB: JOB#<jobId> / ITEM#<id>  (status PENDING)  por cada fila
     -> SQS: un mensaje por fila
-
-Despliegue (AWS Learner Lab):
-  - Runtime  : python3.12
-  - Handler  : splitter_lambda.handler
-  - Role     : LabRole
-  - Sin dependencias externas (solo stdlib + boto3).
-  - Trigger  : S3 -> Event type "PUT" / ObjectCreated, prefijo `inputs/`, sufijo `.csv`.
-  - Timeout  : 60s (suficiente para 20-30 filas).
-
-Variables de entorno:
-  TABLE_NAME       = rubricaia
-  QUEUE_URL        = https://sqs.<region>.amazonaws.com/<acct>/rubricaia-jobs
-  DEFAULT_RUBRICA  = (texto de rubrica por defecto si el objeto S3 no trae metadata 'rubrica')
 """
 
 import os

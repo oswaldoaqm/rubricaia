@@ -11,12 +11,6 @@ Reglas:
   - Contraseñas con PBKDF2 (nunca en claro). Todo stdlib.
 
 Tabla LMS (rubricaia-lms): PK=USER#<email>  SK=PROFILE
-
-Variables de entorno:
-  LMS_TABLE       = rubricaia-lms-<stage>
-  ALLOWED_DOMAIN  = utec.edu.pe
-  TEACHER_EMAILS  = correos de profesores separados por coma
-  JWT_SECRET      = secreto para firmar tokens
 """
 
 import os

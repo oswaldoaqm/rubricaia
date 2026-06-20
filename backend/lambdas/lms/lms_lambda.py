@@ -16,10 +16,6 @@ Modelo (tabla rubricaia-lms):
   USER#<email> / MEMBERSHIP#<id>     -> espejo: clases del estudiante (F3)
   CLASS#<id>   / MEMBER#<email>      -> roster (F3)
   CLASS#<id>   / TASK#<taskId>       -> tareas (F4)
-
-Variables de entorno:
-  LMS_TABLE  = rubricaia-lms-<stage>
-  JWT_SECRET = (lo usa authlib para validar el token)
 """
 
 import os

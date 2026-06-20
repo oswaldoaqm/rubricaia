@@ -1,0 +1,3 @@
+Propuesta de proyecto: Sistema de alertas tempranas contra la desercion
+
+El problema que abordo es la desercion estudiantil en el primer ano de ingenieria. Segun el informe de bienestar universitario 2025, el 28% de los ingresantes abandona antes del tercer ciclo, y la mitad de esos abandonos ocurre tras reprobar dos o mas cursos.

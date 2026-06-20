@@ -1,0 +1,11 @@
+Propuesta de proyecto: Reserva inteligente de espacios en biblioteca
+
+Introduccion: A continuacion presento mi propuesta de proyecto de innovacion, organizada en problema, usuario, solucion e impacto.
+
+Problema. El problema son las colas y la falta de cupos en la biblioteca en epoca de examenes. Un conteo manual durante una semana de parciales mostro hasta 40 minutos de espera y una ocupacion del 95% en las salas de estudio.
+
+Usuario afectado. El usuario afectado es el estudiante que necesita un espacio de estudio en horas pico y pierde tiempo buscando sitio.
+
+Solucion y caso de uso. La solucion es un sistema de reservas que funciona asi: (1) el estudiante ve la disponibilidad de salas en tiempo real; (2) reserva un cupo por franja horaria; (3) confirma su llegada con un codigo QR; (4) si no llega en 15 minutos, el cupo se libera automaticamente.
+
+Conclusion: la propuesta atiende una necesidad concreta de la comunidad y plantea una solucion viable con impacto medible.
