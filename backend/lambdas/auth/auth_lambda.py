@@ -121,4 +121,16 @@ def login(event):
     item = table.get_item(Key={"PK": f"USER#{email}", "SK": "PROFILE"}).get("Item")
     if not item or not verify_password(password, item.get("salt", ""), item.get("pw_hash", "")):
         return _resp(401, {"error": "Correo o contraseña incorrectos"})
+
+    # Re-evaluamos el rol contra la allowlist ACTUAL: así, si corriges TEACHER_EMAILS,
+    # basta volver a iniciar sesion para que el rol se actualice (sin recrear la cuenta).
+    role = role_for(email)
+    if role != item.get("role"):
+        table.update_item(
+            Key={"PK": f"USER#{email}", "SK": "PROFILE"},
+            UpdateExpression="SET #r = :r",
+            ExpressionAttributeNames={"#r": "role"},
+            ExpressionAttributeValues={":r": role},
+        )
+        item["role"] = role
     return _profile_response(item)
