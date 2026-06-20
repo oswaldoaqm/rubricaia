@@ -1,0 +1,150 @@
+# =============================================================================
+# RúbricaIA - Infraestructura como Código (Serverless Framework v4)
+# -----------------------------------------------------------------------------
+# Reemplaza los scripts deploy/*.sh: UNA sola fuente declarativa de toda la
+# arquitectura (S3, SQS+DLQ, DynamoDB, 3 Lambdas y API Gateway).
+#
+# >>> CLAVE PARA AWS LEARNER LAB <<<
+#   - provider.iam.role pinea el LabRole existente. Learner Lab NO permite crear
+#     roles IAM, asi que TODAS las funciones reutilizan LabRole y SF no intenta
+#     crear roles (lo que de otra forma haria fallar el deploy).
+#   - GROQ_API_KEY se toma del entorno del shell (no se commitea nunca).
+#
+# Deploy:
+#   export GROQ_API_KEY="gsk_..."
+#   serverless deploy
+#
+# Ver outputs (incluida la URL del API):
+#   serverless info
+# =============================================================================
+
+org: oswaldoaqm
+app: rubricaia
+service: rubricaia
+
+frameworkVersion: '4'
+
+provider:
+  name: aws
+  runtime: python3.12
+  region: us-east-1
+  stage: ${opt:stage, 'dev'}
+
+  # --- Learner Lab: reutilizar el rol existente en todas las funciones --------
+  iam:
+    role: arn:aws:iam::${aws:accountId}:role/LabRole
+
+  # --- API Gateway HTTP API con CORS abierto (demo) ---------------------------
+  httpApi:
+    cors: true
+
+  # --- Variables de entorno compartidas por las 3 Lambdas ---------------------
+  environment:
+    TABLE_NAME: ${self:service}-${sls:stage}
+    QUEUE_URL: !Ref JobsQueue
+    BUCKET: ${self:custom.bucketName}
+    GROQ_API_KEY: ${env:GROQ_API_KEY}
+    GROQ_MODEL: llama-3.3-70b-versatile
+    MAX_ATTEMPTS: '3'
+    URL_EXPIRES: '300'
+    DEFAULT_RUBRICA: '1) Define un problema real y concreto. 2) Identifica al usuario afectado. 3) Describe el caso de uso. 4) Justifica el impacto esperado con metricas. 5) Redaccion clara y estructurada.'
+
+custom:
+  # Nombre del bucket: global-unico (incluye accountId) y por stage.
+  bucketName: ${self:service}-inputs-${aws:accountId}-${sls:stage}
+
+# Empaquetado individual: cada Lambda solo lleva su propio .py (sin deps externas).
+package:
+  individually: true
+
+functions:
+  # --- Splitter: S3 -> SQS (un evento por entregable) -------------------------
+  splitter:
+    handler: backend/lambdas/splitter/splitter_lambda.handler
+    timeout: 60
+    memorySize: 256
+    package:
+      patterns:
+        - '!**'
+        - 'backend/lambdas/splitter/splitter_lambda.py'
+    events:
+      - s3:
+          bucket: ${self:custom.bucketName}
+          event: s3:ObjectCreated:*
+          rules:
+            - prefix: inputs/
+            - suffix: .csv
+
+  # --- Worker: SQS -> Groq -> DynamoDB (con reintentos/DLQ) --------------------
+  worker:
+    handler: backend/lambdas/worker/worker_lambda.handler
+    timeout: 60
+    memorySize: 256
+    # Throttle anti rate-limit de Groq: max 3 ejecuciones simultaneas.
+    # (Si Learner Lab limita la concurrencia de cuenta, comenta esta linea.)
+    reservedConcurrency: 3
+    package:
+      patterns:
+        - '!**'
+        - 'backend/lambdas/worker/worker_lambda.py'
+    events:
+      - sqs:
+          arn: !GetAtt JobsQueue.Arn
+          batchSize: 5
+          functionResponseType: ReportBatchItemFailures
+
+  # --- API: presigned URL + lectura de resultados -----------------------------
+  api:
+    handler: backend/lambdas/api/api_lambda.handler
+    timeout: 30
+    memorySize: 256
+    package:
+      patterns:
+        - '!**'
+        - 'backend/lambdas/api/api_lambda.py'
+    events:
+      - httpApi: '*'
+
+resources:
+  Resources:
+    # --- DynamoDB: estado y resultados por entregable -------------------------
+    JobsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:service}-${sls:stage}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: PK
+            AttributeType: S
+          - AttributeName: SK
+            AttributeType: S
+        KeySchema:
+          - AttributeName: PK
+            KeyType: HASH
+          - AttributeName: SK
+            KeyType: RANGE
+
+    # --- SQS DLQ: mensajes que agotaron sus reintentos ------------------------
+    JobsDLQ:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service}-dlq-${sls:stage}
+        MessageRetentionPeriod: 1209600  # 14 dias
+
+    # --- SQS principal: bus de eventos + redrive a la DLQ ---------------------
+    JobsQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service}-jobs-${sls:stage}
+        VisibilityTimeout: 120           # >= timeout del Worker (60s)
+        RedrivePolicy:
+          deadLetterTargetArn: !GetAtt JobsDLQ.Arn
+          maxReceiveCount: 3
+
+  Outputs:
+    BucketName:
+      Value: ${self:custom.bucketName}
+    TableName:
+      Value: ${self:service}-${sls:stage}
+    QueueUrl:
+      Value: !Ref JobsQueue
