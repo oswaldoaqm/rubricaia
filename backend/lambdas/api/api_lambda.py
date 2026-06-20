@@ -6,9 +6,11 @@ Disparador : API Gateway HTTP API (ruta $default, integracion AWS_PROXY).
 Funcion    : expone la API que consumira el frontend.
 
 Endpoints:
-  POST /uploads        -> genera presigned URL para subir el CSV a S3
-  GET  /jobs           -> lista todos los jobs (item META)
-  GET  /jobs/{jobId}   -> estado + resultados de un job (progreso por entregable)
+  POST /uploads               -> genera presigned URL para subir el CSV a S3
+  GET  /jobs                  -> lista todos los jobs (item META)
+  GET  /jobs/{jobId}          -> estado + resultados de un job (progreso por entregable)
+  GET  /jobs/{jobId}/report   -> presigned URL de descarga del reporte (Fase 3B)
+                                 ?format=html|csv|json (default html)
 
 Despliegue (AWS Learner Lab):
   - Runtime  : python3.12
@@ -75,6 +77,8 @@ def handler(event, context):
             return create_upload(event)
         if method == "GET" and path == "/jobs":
             return list_jobs()
+        if method == "GET" and path.startswith("/jobs/") and path.endswith("/report"):
+            return get_report(event, path[len("/jobs/"):-len("/report")])
         if method == "GET" and path.startswith("/jobs/"):
             return get_job(path.split("/jobs/", 1)[1])
         return _resp(404, {"error": "ruta no encontrada", "path": path, "method": method})
@@ -210,4 +214,28 @@ def get_job(job_id):
         "counts": counts,
         "insights": insights,
         "results": results,
+        # Fase 3B: el evento JobCompleted disparo SNS (docente notificado) y la
+        # generacion del reporte. El frontend usa estos flags para el badge y la
+        # descarga.
+        "completed": bool(stats.get("completed")) if stats else False,
+        "reportReady": bool(meta.get("report_ready")) if meta else False,
     })
+
+
+# --- GET /jobs/{jobId}/report ----------------------------------------------
+def get_report(event, job_id):
+    """Devuelve una presigned URL para descargar el reporte de clase (Fase 3B)."""
+    qs = event.get("queryStringParameters") or {}
+    fmt = (qs.get("format") or "html").lower()
+    if fmt not in ("html", "csv", "json"):
+        fmt = "html"
+
+    meta = table.get_item(Key={"PK": f"JOB#{job_id}", "SK": "META"}).get("Item") or {}
+    if not meta.get("report_ready"):
+        return _resp(200, {"ready": False})
+
+    key = f"reports/{job_id}/report.{fmt}"
+    url = s3.generate_presigned_url(
+        "get_object", Params={"Bucket": BUCKET, "Key": key}, ExpiresIn=URL_EXPIRES
+    )
+    return _resp(200, {"ready": True, "format": fmt, "url": url})

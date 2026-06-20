@@ -115,6 +115,36 @@ textarea:focus { outline: 2px solid var(--primary); border-color: transparent; }
 .btn.primary:disabled { opacity: 0.6; cursor: default; }
 .btn.ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
 .btn.link { background: none; color: var(--primary); padding: 4px 0; }
+.btn.small { padding: 7px 13px; font-size: 13px; background: var(--panel2); color: var(--text); border: 1px solid var(--border); }
+.btn.small:disabled { opacity: 0.55; cursor: default; }
+
+/* --- Fase 3B: badge "docente notificado" + barra de reporte --------------- */
+.notified {
+  display: inline-block;
+  margin-left: 8px;
+  vertical-align: middle;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--good);
+  background: rgba(47, 191, 113, 0.14);
+  border: 1px solid rgba(47, 191, 113, 0.35);
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+.reportbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 16px 0 4px;
+  padding: 12px 14px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.reportlabel { font-weight: 600; }
+.reportbtns { display: flex; gap: 8px; }
 
 .dashhead { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 

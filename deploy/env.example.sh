@@ -11,6 +11,11 @@ export PROJECT="rubricaia"
 export GROQ_API_KEY="gsk_PON_AQUI_TU_KEY"     # https://console.groq.com/keys
 export GROQ_MODEL="llama-3.3-70b-versatile"
 
+# --- Fase 3B: correo del docente para la notificacion SNS ---
+# AWS enviara un correo de confirmacion: el docente debe hacer clic en
+# "Confirm subscription" UNA vez (queda confirmado para siempre).
+export TEACHER_EMAIL="docente@dominio.com"
+
 # --- Runtime Lambda ---
 export PY_RUNTIME="python3.12"                # si Learner Lab no lo tiene, usa python3.11
 

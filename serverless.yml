@@ -2,7 +2,8 @@
 # RúbricaIA - Infraestructura como Código (Serverless Framework v4)
 # -----------------------------------------------------------------------------
 # Reemplaza los scripts deploy/*.sh: UNA sola fuente declarativa de toda la
-# arquitectura (S3, SQS+DLQ, DynamoDB, 3 Lambdas y API Gateway).
+# arquitectura: S3, SQS+DLQ, DynamoDB (Streams), EventBridge, SNS, API Gateway
+# y 5 Lambdas (splitter, worker, api, aggregator, report).
 #
 # >>> CLAVE PARA AWS LEARNER LAB <<<
 #   - provider.iam.role pinea el LabRole existente. Learner Lab NO permite crear
@@ -47,6 +48,9 @@ provider:
     GROQ_MODEL: llama-3.3-70b-versatile
     MAX_ATTEMPTS: '3'
     URL_EXPIRES: '300'
+    # --- Fase 3B: bus de eventos de dominio + notificacion al docente ---------
+    BUS_NAME: ${self:service}-events-${sls:stage}
+    TOPIC_ARN: !Ref NotifyTopic
     DEFAULT_RUBRICA: '1) Define un problema real y concreto. 2) Identifica al usuario afectado. 3) Describe el caso de uso. 4) Justifica el impacto esperado con metricas. 5) Redaccion clara y estructurada.'
 
 custom:
@@ -115,6 +119,19 @@ functions:
           arn: !GetAtt JobsTable.StreamArn
           batchSize: 10
           startingPosition: LATEST
+
+  # --- Report (Fase 3B): EventBridge JobCompleted -> reporte de clase a S3 -----
+  # Sin 'events' aqui a proposito: el trigger EventBridge -> Report se declara en
+  # 'resources' (JobCompletedRule + ReportEventsPermission), igual que el patron
+  # S3 -> Splitter, para controlar permisos en Learner Lab sin tocar LabRole.
+  report:
+    handler: backend/lambdas/report/report_lambda.handler
+    timeout: 60
+    memorySize: 256
+    package:
+      patterns:
+        - '!**'
+        - 'backend/lambdas/report/report_lambda.py'
 
 resources:
   Resources:
@@ -192,6 +209,93 @@ resources:
                       Value: .csv
               Function: !GetAtt SplitterLambdaFunction.Arn
 
+    # =========================================================================
+    # FASE 3B - Arquitectura de eventos de dominio: cuando un lote termina,
+    # el Aggregator publica un evento "JobCompleted" en un bus de EventBridge.
+    # El bus hace fan-out a DOS consumidores independientes:
+    #   (1) SNS  -> email al docente.
+    #   (2) Report Lambda -> genera el reporte de clase (CSV/JSON/HTML) en S3.
+    # Cada uno reacciona por su cuenta; agregar/quitar consumidores no toca al
+    # productor. Eso es desacoplamiento event-driven real (no SQS punto a punto).
+    # =========================================================================
+
+    # --- Bus de eventos de dominio -------------------------------------------
+    EventsBus:
+      Type: AWS::Events::EventBus
+      Properties:
+        Name: ${self:service}-events-${sls:stage}
+
+    # --- SNS: tema de notificacion al docente --------------------------------
+    NotifyTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        TopicName: ${self:service}-notify-${sls:stage}
+        DisplayName: RubricaIA
+
+    # Suscripcion por email. OJO: AWS envia un correo de confirmacion; el
+    # docente DEBE hacer clic en "Confirm subscription" una vez (queda confirmado
+    # para siempre). Pon el correo con: export TEACHER_EMAIL="docente@dominio.com"
+    NotifySubscription:
+      Type: AWS::SNS::Subscription
+      Properties:
+        TopicArn: !Ref NotifyTopic
+        Protocol: email
+        Endpoint: ${env:TEACHER_EMAIL}
+
+    # Permite que EventBridge publique en el tema (permiso basado en recurso,
+    # no toca el LabRole).
+    NotifyTopicPolicy:
+      Type: AWS::SNS::TopicPolicy
+      Properties:
+        Topics:
+          - !Ref NotifyTopic
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Sid: AllowEventBridgePublish
+              Effect: Allow
+              Principal:
+                Service: events.amazonaws.com
+              Action: sns:Publish
+              Resource: !Ref NotifyTopic
+
+    # --- Regla del bus: JobCompleted -> SNS + Report Lambda (fan-out) ---------
+    JobCompletedRule:
+      Type: AWS::Events::Rule
+      Properties:
+        Name: ${self:service}-jobcompleted-${sls:stage}
+        EventBusName: !Ref EventsBus
+        State: ENABLED
+        EventPattern:
+          source:
+            - rubricaia.aggregator
+          detail-type:
+            - JobCompleted
+        Targets:
+          # (1) Email al docente. InputTransformer = mensaje legible (no el JSON crudo).
+          - Id: NotifyTeacher
+            Arn: !Ref NotifyTopic
+            InputTransformer:
+              InputPathsMap:
+                jobId: '$.detail.jobId'
+                total: '$.detail.total'
+                done: '$.detail.done'
+                failed: '$.detail.failed'
+                promedio: '$.detail.promedio'
+              InputTemplate: '"RubricaIA: el lote <jobId> termino de evaluarse. Entregables: <total> | Evaluados OK: <done> | Con error: <failed> | Promedio de la clase: <promedio>%. Descarga el reporte completo desde el panel de RubricaIA."'
+          # (2) Report Lambda. Recibe el evento completo (detail.jobId).
+          - Id: ReportLambda
+            Arn: !GetAtt ReportLambdaFunction.Arn
+
+    # Permite que EventBridge invoque la Report Lambda (permiso basado en recurso).
+    ReportEventsPermission:
+      Type: AWS::Lambda::Permission
+      Properties:
+        FunctionName: !GetAtt ReportLambdaFunction.Arn
+        Action: lambda:InvokeFunction
+        Principal: events.amazonaws.com
+        SourceArn: !GetAtt JobCompletedRule.Arn
+
   Outputs:
     BucketName:
       Value: ${self:custom.bucketName}
@@ -199,3 +303,7 @@ resources:
       Value: ${self:service}-${sls:stage}
     QueueUrl:
       Value: !Ref JobsQueue
+    NotifyTopicArn:
+      Value: !Ref NotifyTopic
+    EventsBusName:
+      Value: ${self:service}-events-${sls:stage}

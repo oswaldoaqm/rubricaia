@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { createUpload, uploadCsv, getJob } from "./api";
+import { createUpload, uploadCsv, getJob, getReport } from "./api";
 
 const DEFAULT_RUBRICA = `1) Define un problema real y concreto.
 2) Identifica al usuario afectado.
@@ -48,7 +48,7 @@ export default function App() {
       )}
 
       <footer className="foot">
-        Arquitectura serverless basada en eventos · S3 → SQS → Lambda → Groq · AWS Learner Lab
+        Arquitectura serverless basada en eventos · S3 → SQS → Lambda → Groq → EventBridge → SNS · AWS Learner Lab
       </footer>
     </div>
   );
@@ -108,16 +108,24 @@ function Dashboard({ jobId, onNew }) {
   const [data, setData] = useState(null);
   const [selected, setSelected] = useState(null);
   const timer = useRef(null);
+  const reportPolls = useRef(0);
 
   useEffect(() => {
     let active = true;
+    reportPolls.current = 0;
 
     async function poll() {
       try {
         const d = await getJob(jobId);
         if (!active) return;
         setData(d);
-        if (d.jobStatus !== "DONE") {
+        // Sigue sondeando mientras el lote no termina; una vez DONE, da unos
+        // sondeos extra hasta que el reporte (Fase 3B) quede listo.
+        const done = d.jobStatus === "DONE";
+        if (!done) {
+          timer.current = setTimeout(poll, 2500);
+        } else if (!d.reportReady && reportPolls.current < 10) {
+          reportPolls.current += 1;
           timer.current = setTimeout(poll, 2500);
         }
       } catch {
@@ -147,7 +155,14 @@ function Dashboard({ jobId, onNew }) {
     <main className="card">
       <div className="dashhead">
         <div>
-          <h2>Resultados del lote</h2>
+          <h2>
+            Resultados del lote{" "}
+            {data.completed && (
+              <span className="notified" title="El docente fue notificado por email (SNS)">
+                ✉️ Docente notificado
+              </span>
+            )}
+          </h2>
           <div className="muted mono">{jobId}</div>
         </div>
         <button className="btn ghost" onClick={onNew}>
@@ -164,6 +179,8 @@ function Dashboard({ jobId, onNew }) {
           {data.failed > 0 ? ` · ${data.failed} con error` : ""} · estado {data.jobStatus}
         </div>
       </div>
+
+      {!running && <ReportBar jobId={jobId} ready={data.reportReady} />}
 
       {data.insights && <InsightsPanel insights={data.insights} />}
 
@@ -258,6 +275,47 @@ function InsightsPanel({ insights }) {
           </ul>
         </div>
       )}
+    </div>
+  );
+}
+
+function ReportBar({ jobId, ready }) {
+  const [busy, setBusy] = useState(null);
+
+  async function open(format) {
+    setBusy(format);
+    try {
+      const r = await getReport(jobId, format);
+      if (r.ready && r.url) window.open(r.url, "_blank", "noopener");
+    } catch {
+      /* el reporte aún puede estar generándose */
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  if (!ready) {
+    return (
+      <div className="reportbar">
+        <span className="muted">⏳ Generando el reporte de clase…</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="reportbar">
+      <span className="reportlabel">📄 Reporte de clase</span>
+      <div className="reportbtns">
+        <button className="btn small" disabled={busy} onClick={() => open("html")}>
+          {busy === "html" ? "…" : "Ver HTML"}
+        </button>
+        <button className="btn small" disabled={busy} onClick={() => open("csv")}>
+          {busy === "csv" ? "…" : "CSV"}
+        </button>
+        <button className="btn small" disabled={busy} onClick={() => open("json")}>
+          {busy === "json" ? "…" : "JSON"}
+        </button>
+      </div>
     </div>
   );
 }

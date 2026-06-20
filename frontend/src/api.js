@@ -30,3 +30,10 @@ export async function getJob(jobId) {
   if (!r.ok) throw new Error(`getJob HTTP ${r.status}`);
   return r.json();
 }
+
+// 4) Pide la presigned URL del reporte de clase (Fase 3B). format: html|csv|json.
+export async function getReport(jobId, format = "html") {
+  const r = await fetch(`${API}/jobs/${jobId}/report?format=${format}`);
+  if (!r.ok) throw new Error(`getReport HTTP ${r.status}`);
+  return r.json(); // { ready, format, url }
+}
