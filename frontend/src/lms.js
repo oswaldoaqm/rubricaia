@@ -1,6 +1,6 @@
 // Cliente del plano de control (clases, membresías, tareas).
 // Todas las llamadas van con el JWT en el header Authorization.
-import { authHeaders } from "./auth";
+import { authHeaders, clearToken } from "./auth";
 
 const API = import.meta.env.VITE_API_URL;
 
@@ -10,6 +10,11 @@ async function call(path, method = "GET", body) {
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: body ? JSON.stringify(body) : undefined,
   });
+  if (r.status === 401) {
+    clearToken();
+    window.location.reload();
+    return new Promise(() => {});
+  }
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
   return data;

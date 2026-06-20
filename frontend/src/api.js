@@ -1,6 +1,6 @@
 // Cliente de la API de RúbricaIA.
 // La URL del backend se inyecta en build time con VITE_API_URL (ver deploy-frontend.sh).
-import { authHeaders } from "./auth";
+import { authHeaders, clearToken } from "./auth";
 
 const API = import.meta.env.VITE_API_URL;
 
@@ -31,6 +31,11 @@ export async function createTaskUpload(classId, taskId) {
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({ classId, taskId }),
   });
+  if (r.status === 401) {
+    clearToken();
+    window.location.reload();
+    return new Promise(() => {});
+  }
   if (!r.ok) {
     const d = await r.json().catch(() => ({}));
     throw new Error(d.error || `createTaskUpload HTTP ${r.status}`);

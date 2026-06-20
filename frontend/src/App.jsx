@@ -30,6 +30,23 @@ const STATUS_LABEL = {
   FAILED: "Error",
 };
 
+function dueState(dueDate) {
+  if (!dueDate) return null;
+  const due = new Date(dueDate + "T23:59:59");
+  if (Number.isNaN(due.getTime())) return { label: "Entrega: " + dueDate };
+  const days = Math.ceil((due - new Date()) / 86400000);
+  if (days < 0) return { label: `Vencida hace ${-days} día${-days > 1 ? "s" : ""}`, tone: "overdue" };
+  if (days === 0) return { label: "Vence hoy", tone: "soon" };
+  if (days <= 3) return { label: `Vence en ${days} día${days > 1 ? "s" : ""}`, tone: "soon" };
+  return { label: "Entrega: " + dueDate };
+}
+
+function DueLabel({ dueDate }) {
+  const s = dueState(dueDate);
+  if (!s) return <span className="muted small">Sin fecha límite</span>;
+  return <span className={"due" + (s.tone ? " " + s.tone : "")}>{s.label}</span>;
+}
+
 function BrandMark() {
   return (
     <svg className="logomark" width="30" height="30" viewBox="0 0 30 30" fill="none" aria-hidden="true">
@@ -218,8 +235,8 @@ function StudentClassDetail({ classId, onBack }) {
                 >
                   <div>
                     <div className="taskname">{t.title}</div>
-                    <div className="muted small">
-                      {t.dueDate ? "Entrega: " + t.dueDate : "Sin fecha límite"}
+                    <div className="small">
+                      <DueLabel dueDate={t.dueDate} />
                     </div>
                   </div>
                   <span className="muted small">
@@ -391,7 +408,9 @@ function TaskSubmit({ classId, task, onBack }) {
         ← Volver a la clase
       </button>
       <h2>{task.title}</h2>
-      <p className="muted">{task.dueDate ? "Entrega hasta: " + task.dueDate : "Sin fecha límite"}</p>
+      <p className="small">
+        <DueLabel dueDate={task.dueDate} />
+      </p>
 
       <div className="rubricbox">
         <div className="ilabel">Rúbrica de esta tarea</div>
@@ -647,9 +666,9 @@ function TeacherClassDetail({ classId, onBack }) {
                 <li key={t.taskId} className="taskitem">
                   <div>
                     <div className="taskname">{t.title}</div>
-                    <div className="muted small">
-                      {t.dueDate ? "Entrega: " + t.dueDate : "Sin fecha límite"}
-                      {t.pesos ? " · pesos: " + t.pesos.join(",") : ""}
+                    <div className="small">
+                      <DueLabel dueDate={t.dueDate} />
+                      {t.pesos ? <span className="muted"> · pesos: {t.pesos.join(",")}</span> : ""}
                     </div>
                   </div>
                   <div className="rowbtns">
@@ -774,17 +793,33 @@ function TaskSubmissions({ classId, task, onBack }) {
   const [error, setError] = useState(null);
   const [selected, setSelected] = useState(null);
 
-  useEffect(() => {
+  function load() {
+    setError(null);
     getTaskSubmissions(classId, task.taskId)
       .then(setData)
       .catch((e) => setError(e.message));
+  }
+
+  useEffect(() => {
+    load();
   }, [classId, task.taskId]);
 
   return (
     <main className="card">
-      <button className="btn ghost" onClick={onBack}>
-        ← Volver
-      </button>
+      <div className="detailhead">
+        <button className="btn ghost" onClick={onBack}>
+          ← Volver
+        </button>
+        <button
+          className="btn small"
+          onClick={() => {
+            setData(null);
+            load();
+          }}
+        >
+          Actualizar
+        </button>
+      </div>
       <h2>Entregas · {task.title}</h2>
       {error && <div className="error">{error}</div>}
       {!data ? (

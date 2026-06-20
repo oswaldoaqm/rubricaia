@@ -121,6 +121,10 @@ input[type="file"] { padding: 8px; background: var(--panel2); cursor: pointer; }
 .taskitem.clickable { cursor: pointer; transition: border-color 0.12s; }
 .taskitem.clickable:hover { border-color: var(--line-strong); }
 .taskname { font-weight: 500; }
+.due { font-size: 13px; color: var(--muted); }
+.due.soon { color: var(--mid); font-weight: 500; }
+.due.overdue { color: var(--bad); font-weight: 500; }
+.detailhead { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
 .formtitle { font-family: var(--serif); margin: 24px 0 10px; font-size: 17px; font-weight: 500; }
 .taskform { display: flex; flex-direction: column; gap: 2px; }
 .taskform .formrow { display: flex; gap: 14px; flex-wrap: wrap; }
@@ -169,6 +173,11 @@ input[type="file"] { padding: 8px; background: var(--panel2); cursor: pointer; }
 
 /* --- Tabla de resultados --- */
 .grid { width: 100%; border-collapse: collapse; margin-top: 18px; }
+@media (max-width: 560px) {
+  .card { padding: 20px 16px; }
+  .topbar { gap: 8px; }
+  .grid { display: block; overflow-x: auto; white-space: nowrap; }
+}
 .grid th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 500; padding: 8px 10px; border-bottom: 1px solid var(--line-strong); }
 .grid td { padding: 11px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 .badge { font-size: 12px; font-weight: 500; padding: 3px 10px; border-radius: 999px; background: var(--panel2); color: var(--muted); }
