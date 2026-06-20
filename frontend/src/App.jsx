@@ -235,6 +235,102 @@ function StudentClassDetail({ classId, onBack }) {
   );
 }
 
+// P3: vista de resultado enfocada para el alumno (su retroalimentación).
+function StudentResult({ jobId, onResubmit }) {
+  const [data, setData] = useState(null);
+  const timer = useRef(null);
+
+  useEffect(() => {
+    let active = true;
+    async function poll() {
+      try {
+        const d = await getJob(jobId);
+        if (!active) return;
+        setData(d);
+        const r = (d.results && d.results[0]) || null;
+        const settled = r && (r.status === "DONE" || r.status === "FAILED");
+        if (!settled) timer.current = setTimeout(poll, 2500);
+      } catch {
+        if (active) timer.current = setTimeout(poll, 3000);
+      }
+    }
+    poll();
+    return () => {
+      active = false;
+      if (timer.current) clearTimeout(timer.current);
+    };
+  }, [jobId]);
+
+  const r = data && data.results && data.results[0];
+
+  if (!r || ["PENDING", "PROCESSING", "RETRYING"].includes(r.status)) {
+    return (
+      <div className="resultwrap">
+        <div className="evaluating">
+          <div className="spinner" />
+          <p className="muted">Evaluando tu entrega contra la rúbrica…</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (r.status === "FAILED") {
+    return (
+      <div className="resultwrap">
+        <div className="error">No se pudo evaluar tu entrega. {r.last_error || ""}</div>
+        <button className="btn primary" onClick={onResubmit}>
+          Volver a intentar
+        </button>
+      </div>
+    );
+  }
+
+  const crit = r.criterios || [];
+  const met = crit.filter((c) => c.cumple).length;
+  const kind = r.cumplimiento >= 70 ? "good" : r.cumplimiento >= 40 ? "mid" : "bad";
+
+  return (
+    <div className="resultwrap">
+      <div className="scorehead">
+        <div className={"scorering " + kind}>
+          <span className="scorenum">{r.cumplimiento}%</span>
+        </div>
+        <div>
+          <div className="scorelabel">Cumplimiento</div>
+          <div className="muted">
+            Cumples {met} de {crit.length} criterios
+          </div>
+        </div>
+      </div>
+
+      {crit.length > 0 ? (
+        <div className="criterios">
+          {crit.map((c, i) => (
+            <div key={i} className={"crit " + (c.cumple ? "ok" : "bad")}>
+              <div className="crithead">
+                <span className="critmark">{c.cumple ? "✓" : "✗"}</span>
+                <span className="crittitle">{c.criterio}</span>
+              </div>
+              {c.evidencia && <div className="critev">{c.evidencia}</div>}
+              {!c.cumple && c.sugerencia && <div className="critsug">→ {c.sugerencia}</div>}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <>
+          <Section title="✓ Criterios cumplidos" items={r.criterios_ok} kind="ok" />
+          <Section title="✗ Faltantes" items={r.faltantes} kind="bad" />
+          <Section title="→ Sugerencias" items={r.sugerencias} kind="sug" />
+        </>
+      )}
+
+      <button className="btn ghost" onClick={onResubmit} style={{ marginTop: 18 }}>
+        Volver a entregar
+      </button>
+    </div>
+  );
+}
+
 // F5: el alumno entrega su PDF/Word a una tarea -> pipeline -> su retroalimentación.
 function TaskSubmit({ classId, task, onBack }) {
   const [files, setFiles] = useState([]);
@@ -284,7 +380,7 @@ function TaskSubmit({ classId, task, onBack }) {
           ← Volver a la clase
         </button>
         <h2>{task.title}</h2>
-        <Dashboard jobId={jobId} onNew={() => setJobId(null)} />
+        <StudentResult jobId={jobId} onResubmit={() => setJobId(null)} />
       </main>
     );
   }
