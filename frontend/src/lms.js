@@ -19,3 +19,12 @@ async function call(path, method = "GET", body) {
 export const listClasses = () => call("/classes", "GET");
 export const createClass = (name) => call("/classes", "POST", { name });
 export const deleteClass = (classId) => call("/classes/delete", "POST", { classId });
+
+// --- Membresías / invitaciones (F3) ---
+export const getClassDetail = (classId) =>
+  call(`/classes/detail?classId=${encodeURIComponent(classId)}`, "GET");
+export const inviteMember = (classId, email) =>
+  call("/classes/invite", "POST", { classId, email });
+export const removeMember = (classId, email) =>
+  call("/classes/remove", "POST", { classId, email });
+export const acceptInvite = (classId) => call("/classes/accept", "POST", { classId });

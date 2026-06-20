@@ -54,36 +54,132 @@ export default function App() {
   );
 }
 
-// Área del estudiante: por ahora mantiene el flujo de subida directo.
-// En F5 se moverá dentro de las tareas de cada clase.
+// Área del estudiante (F3): invitaciones + clases activas. La subida por tarea
+// se conecta en F5.
 function StudentArea() {
-  const [view, setView] = useState("upload");
-  const [jobId, setJobId] = useState(null);
+  const [data, setData] = useState(null); // { classes, invitations }
+  const [error, setError] = useState(null);
+  const [openClass, setOpenClass] = useState(null);
 
-  return view === "upload" ? (
-    <UploadView
-      onStarted={(id) => {
-        setJobId(id);
-        setView("dashboard");
-      }}
-    />
-  ) : (
-    <Dashboard
-      jobId={jobId}
-      onNew={() => {
-        setView("upload");
-        setJobId(null);
-      }}
-    />
+  async function load() {
+    try {
+      setData(await listClasses());
+    } catch (e) {
+      setError(e.message);
+      setData({ classes: [], invitations: [] });
+    }
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  async function onAccept(classId) {
+    setError(null);
+    try {
+      await acceptInvite(classId);
+      await load();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  if (openClass) {
+    return <StudentClassDetail classId={openClass} onBack={() => setOpenClass(null)} />;
+  }
+
+  return (
+    <main className="card">
+      <h2>Mis clases</h2>
+      {error && <div className="error">{error}</div>}
+      {data === null ? (
+        <p className="muted">Cargando…</p>
+      ) : (
+        <>
+          {data.invitations && data.invitations.length > 0 && (
+            <div className="invites">
+              <div className="ilabel">Invitaciones pendientes</div>
+              {data.invitations.map((inv) => (
+                <div key={inv.classId} className="inviteitem">
+                  <span>
+                    Te invitaron a <strong>{inv.name}</strong>
+                  </span>
+                  <button className="btn small" onClick={() => onAccept(inv.classId)}>
+                    Aceptar
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          {data.classes.length === 0 ? (
+            <p className="muted">
+              Aún no perteneces a ninguna clase. Cuando un profesor te invite, aparecerá aquí
+              y la verás tras aceptar.
+            </p>
+          ) : (
+            <ul className="classlist">
+              {data.classes.map((c) => (
+                <li
+                  key={c.classId}
+                  className="classitem clickable"
+                  onClick={() => setOpenClass(c.classId)}
+                >
+                  <div>
+                    <div className="classname">{c.name}</div>
+                    <div className="muted small">{c.ownerEmail}</div>
+                  </div>
+                  <span className="muted">Abrir →</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+    </main>
   );
 }
 
-// Área del profesor (F2): gestión de clases.
+function StudentClassDetail({ classId, onBack }) {
+  const [detail, setDetail] = useState(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    getClassDetail(classId).then(setDetail).catch((e) => setError(e.message));
+  }, [classId]);
+
+  return (
+    <main className="card">
+      <button className="btn ghost" onClick={onBack}>
+        ← Volver
+      </button>
+      {error && <div className="error">{error}</div>}
+      {!detail ? (
+        <p className="muted">Cargando…</p>
+      ) : (
+        <>
+          <h2>{detail.name}</h2>
+          <p className="muted">Profesor: {detail.ownerEmail}</p>
+          {detail.tasks.length === 0 ? (
+            <p className="muted">Aún no hay tareas en esta clase.</p>
+          ) : (
+            <p className="muted">
+              {detail.tasks.length} tarea(s). La entrega por tarea se habilita en el siguiente
+              bloque.
+            </p>
+          )}
+        </>
+      )}
+    </main>
+  );
+}
+
+// Área del profesor (F2/F3): gestión de clases + detalle (roster/invitaciones).
 function TeacherClasses() {
   const [classes, setClasses] = useState(null);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [openClass, setOpenClass] = useState(null);
 
   async function load() {
     try {
@@ -126,11 +222,16 @@ function TeacherClasses() {
     }
   }
 
+  if (openClass) {
+    return <TeacherClassDetail classId={openClass} onBack={() => setOpenClass(null)} />;
+  }
+
   return (
     <main className="card">
       <h2>Mis clases</h2>
       <p className="muted">
-        Crea y gestiona tus clases. Luego podrás invitar estudiantes y crear tareas con su rúbrica.
+        Crea y gestiona tus clases. Entra en una para invitar estudiantes y crear tareas con su
+        rúbrica.
       </p>
 
       <form onSubmit={onCreate} className="inlineform">
@@ -155,16 +256,121 @@ function TeacherClasses() {
         <ul className="classlist">
           {classes.map((c) => (
             <li key={c.classId} className="classitem">
-              <div>
+              <div className="clickarea" onClick={() => setOpenClass(c.classId)}>
                 <div className="classname">{c.name}</div>
                 <div className="muted small mono">{c.classId}</div>
               </div>
-              <button className="btn small danger" onClick={() => onDelete(c.classId)}>
-                Eliminar
-              </button>
+              <div className="rowbtns">
+                <button className="btn small" onClick={() => setOpenClass(c.classId)}>
+                  Gestionar
+                </button>
+                <button className="btn small danger" onClick={() => onDelete(c.classId)}>
+                  Eliminar
+                </button>
+              </div>
             </li>
           ))}
         </ul>
+      )}
+    </main>
+  );
+}
+
+function TeacherClassDetail({ classId, onBack }) {
+  const [detail, setDetail] = useState(null);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  async function load() {
+    try {
+      setDetail(await getClassDetail(classId));
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  useEffect(() => {
+    load();
+  }, [classId]);
+
+  async function onInvite(e) {
+    e.preventDefault();
+    if (!inviteEmail.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await inviteMember(classId, inviteEmail.trim());
+      setInviteEmail("");
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onRemove(email) {
+    if (!window.confirm(`¿Quitar a ${email} de la clase?`)) return;
+    setError(null);
+    try {
+      await removeMember(classId, email);
+      await load();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  return (
+    <main className="card">
+      <button className="btn ghost" onClick={onBack}>
+        ← Volver
+      </button>
+      {error && <div className="error">{error}</div>}
+      {!detail ? (
+        <p className="muted">Cargando…</p>
+      ) : (
+        <>
+          <h2>{detail.name}</h2>
+          <p className="muted small mono">{detail.classId}</p>
+
+          <h3>Invitar estudiante</h3>
+          <form onSubmit={onInvite} className="inlineform">
+            <input
+              type="email"
+              value={inviteEmail}
+              placeholder="alumno@utec.edu.pe"
+              onChange={(e) => setInviteEmail(e.target.value)}
+            />
+            <button className="btn primary" disabled={busy}>
+              {busy ? "…" : "Invitar"}
+            </button>
+          </form>
+
+          <h3>Miembros ({detail.members.length})</h3>
+          {detail.members.length === 0 ? (
+            <p className="muted">Aún no hay miembros. Invita por correo arriba.</p>
+          ) : (
+            <ul className="memberlist">
+              {detail.members.map((m) => (
+                <li key={m.email} className="memberitem">
+                  <span className="mono">{m.email}</span>
+                  <span className={"statuschip " + m.status}>
+                    {m.status === "active" ? "activo" : "invitado"}
+                  </span>
+                  <button className="btn small danger" onClick={() => onRemove(m.email)}>
+                    quitar
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <h3>Tareas</h3>
+          <p className="muted">
+            La gestión de tareas (rúbrica, pesos, fecha límite) se habilita en el siguiente bloque.
+          </p>
+        </>
       )}
     </main>
   );

@@ -35,6 +35,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "common"))
 from authlib import auth_from_event  # noqa: E402
 
 LMS_TABLE = os.environ["LMS_TABLE"]
+ALLOWED_DOMAIN = os.environ.get("ALLOWED_DOMAIN", "utec.edu.pe").lower().lstrip("@")
 ddb = boto3.resource("dynamodb")
 table = ddb.Table(LMS_TABLE)
 
@@ -70,6 +71,14 @@ def handler(event, context):
     try:
         if method == "POST" and path.endswith("/classes/delete"):
             return delete_class(email, role, event)
+        if method == "POST" and path.endswith("/classes/invite"):
+            return invite_member(email, role, event)
+        if method == "POST" and path.endswith("/classes/remove"):
+            return remove_member(email, role, event)
+        if method == "POST" and path.endswith("/classes/accept"):
+            return accept_invite(email, event)
+        if method == "GET" and path.endswith("/classes/detail"):
+            return get_detail(email, role, event)
         if method == "POST" and path.endswith("/classes"):
             return create_class(email, role, event)
         if method == "GET" and path.endswith("/classes"):
@@ -116,22 +125,33 @@ def create_class(email, role, event):
 
 # --- GET /classes ----------------------------------------------------------
 def list_classes(email, role):
-    # Profesor: clases que posee (OWNS#). Estudiante: donde es miembro (MEMBERSHIP#).
-    prefix = "OWNS#" if role == "profesor" else "MEMBERSHIP#"
+    if role == "profesor":
+        resp = table.query(
+            KeyConditionExpression=Key("PK").eq(f"USER#{email}") & Key("SK").begins_with("OWNS#")
+        )
+        classes = [
+            {"classId": i.get("classId"), "name": i.get("name"), "createdAt": i.get("createdAt")}
+            for i in resp.get("Items", [])
+        ]
+        classes.sort(key=lambda c: c.get("createdAt") or "", reverse=True)
+        return _resp(200, {"classes": classes, "role": role})
+
+    # Estudiante: separa clases ACTIVAS (ya aceptadas) de INVITACIONES pendientes.
     resp = table.query(
-        KeyConditionExpression=Key("PK").eq(f"USER#{email}") & Key("SK").begins_with(prefix)
+        KeyConditionExpression=Key("PK").eq(f"USER#{email}") & Key("SK").begins_with("MEMBERSHIP#")
     )
-    classes = [
-        {
+    active, invitations = [], []
+    for i in resp.get("Items", []):
+        entry = {
             "classId": i.get("classId"),
             "name": i.get("name"),
-            "createdAt": i.get("createdAt"),
-            "status": i.get("status"),  # solo aplica a estudiante (invited/active)
+            "ownerEmail": i.get("ownerEmail"),
+            "status": i.get("status"),
+            "invitedAt": i.get("invitedAt"),
         }
-        for i in resp.get("Items", [])
-    ]
-    classes.sort(key=lambda c: c.get("createdAt") or "", reverse=True)
-    return _resp(200, {"classes": classes, "role": role})
+        (active if i.get("status") == "active" else invitations).append(entry)
+    active.sort(key=lambda c: c.get("name") or "")
+    return _resp(200, {"classes": active, "invitations": invitations, "role": role})
 
 
 # --- POST /classes/delete --------------------------------------------------
@@ -167,3 +187,152 @@ def delete_class(email, role, event):
         bw.delete_item(Key={"PK": f"USER#{email}", "SK": f"OWNS#{class_id}"})
 
     return _resp(200, {"deleted": class_id})
+
+
+# --- helper: cargar META y verificar que 'email' es el dueño ----------------
+def _owned_class(class_id, email):
+    meta = table.get_item(Key={"PK": f"CLASS#{class_id}", "SK": "META"}).get("Item")
+    if not meta:
+        return None, _resp(404, {"error": "Clase no encontrada"})
+    if meta.get("ownerEmail") != email:
+        return None, _resp(403, {"error": "No eres el dueño de esta clase"})
+    return meta, None
+
+
+# --- POST /classes/invite --------------------------------------------------
+def invite_member(email, role, event):
+    if role != "profesor":
+        return _resp(403, {"error": "Solo un profesor puede invitar"})
+    body = json.loads(event.get("body") or "{}")
+    class_id = (body.get("classId") or "").strip()
+    invitee = (body.get("email") or "").strip().lower()
+
+    if "@" not in invitee or not invitee.endswith("@" + ALLOWED_DOMAIN):
+        return _resp(400, {"error": f"El correo debe ser @{ALLOWED_DOMAIN}"})
+    if invitee == email:
+        return _resp(400, {"error": "No puedes invitarte a ti mismo"})
+
+    meta, err = _owned_class(class_id, email)
+    if err:
+        return err
+
+    existing = table.get_item(Key={"PK": f"CLASS#{class_id}", "SK": f"MEMBER#{invitee}"}).get("Item")
+    if existing:
+        return _resp(200, {"invited": invitee, "status": existing.get("status"), "already": True})
+
+    now = now_iso()
+    table.put_item(
+        Item={
+            "PK": f"CLASS#{class_id}",
+            "SK": f"MEMBER#{invitee}",
+            "email": invitee,
+            "status": "invited",
+            "role": "estudiante",
+            "invitedAt": now,
+        }
+    )
+    table.put_item(
+        Item={
+            "PK": f"USER#{invitee}",
+            "SK": f"MEMBERSHIP#{class_id}",
+            "classId": class_id,
+            "name": meta.get("name"),
+            "ownerEmail": email,
+            "status": "invited",
+            "invitedAt": now,
+        }
+    )
+    return _resp(200, {"invited": invitee, "status": "invited"})
+
+
+# --- POST /classes/remove --------------------------------------------------
+def remove_member(email, role, event):
+    if role != "profesor":
+        return _resp(403, {"error": "Solo un profesor puede quitar miembros"})
+    body = json.loads(event.get("body") or "{}")
+    class_id = (body.get("classId") or "").strip()
+    target = (body.get("email") or "").strip().lower()
+
+    _, err = _owned_class(class_id, email)
+    if err:
+        return err
+
+    table.delete_item(Key={"PK": f"CLASS#{class_id}", "SK": f"MEMBER#{target}"})
+    table.delete_item(Key={"PK": f"USER#{target}", "SK": f"MEMBERSHIP#{class_id}"})
+    return _resp(200, {"removed": target})
+
+
+# --- POST /classes/accept (estudiante) -------------------------------------
+def accept_invite(email, event):
+    body = json.loads(event.get("body") or "{}")
+    class_id = (body.get("classId") or "").strip()
+
+    mem = table.get_item(Key={"PK": f"USER#{email}", "SK": f"MEMBERSHIP#{class_id}"}).get("Item")
+    if not mem:
+        return _resp(404, {"error": "No tienes una invitación a esta clase"})
+
+    now = now_iso()
+    # Activa la membresia en ambos lados (espejo del alumno y roster de la clase).
+    table.update_item(
+        Key={"PK": f"USER#{email}", "SK": f"MEMBERSHIP#{class_id}"},
+        UpdateExpression="SET #s = :a, acceptedAt = :t",
+        ExpressionAttributeNames={"#s": "status"},
+        ExpressionAttributeValues={":a": "active", ":t": now},
+    )
+    table.update_item(
+        Key={"PK": f"CLASS#{class_id}", "SK": f"MEMBER#{email}"},
+        UpdateExpression="SET #s = :a, acceptedAt = :t",
+        ExpressionAttributeNames={"#s": "status"},
+        ExpressionAttributeValues={":a": "active", ":t": now},
+    )
+    return _resp(200, {"accepted": class_id, "name": mem.get("name")})
+
+
+# --- GET /classes/detail?classId=... ---------------------------------------
+def get_detail(email, role, event):
+    qs = event.get("queryStringParameters") or {}
+    class_id = (qs.get("classId") or "").strip()
+
+    meta = table.get_item(Key={"PK": f"CLASS#{class_id}", "SK": "META"}).get("Item")
+    if not meta:
+        return _resp(404, {"error": "Clase no encontrada"})
+
+    items = table.query(KeyConditionExpression=Key("PK").eq(f"CLASS#{class_id}")).get("Items", [])
+    members = [
+        {"email": i.get("email"), "status": i.get("status"), "invitedAt": i.get("invitedAt")}
+        for i in items
+        if i["SK"].startswith("MEMBER#")
+    ]
+    members.sort(key=lambda m: m.get("email") or "")
+    tasks = [
+        {
+            "taskId": i.get("taskId"),
+            "title": i.get("title"),
+            "dueDate": i.get("dueDate"),
+            "rubrica": i.get("rubrica"),
+            "pesos": [float(p) for p in i.get("pesos", [])] if i.get("pesos") else None,
+        }
+        for i in items
+        if i["SK"].startswith("TASK#")
+    ]
+    tasks.sort(key=lambda t: t.get("dueDate") or "")
+
+    is_owner = meta.get("ownerEmail") == email
+    if not is_owner:
+        me = next(
+            (m for m in members if m["email"] == email and m["status"] == "active"), None
+        )
+        if not me:
+            return _resp(403, {"error": "No perteneces a esta clase"})
+
+    return _resp(
+        200,
+        {
+            "classId": class_id,
+            "name": meta.get("name"),
+            "ownerEmail": meta.get("ownerEmail"),
+            "isOwner": is_owner,
+            "members": members,
+            "tasks": tasks,
+        },
+    )
