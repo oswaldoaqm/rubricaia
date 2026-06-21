@@ -12,7 +12,7 @@ límites de la API del LLM.
 ## Enlaces
 
 - **Frontend (demo pública):** https://main.d2aurxjj1g5f03.amplifyapp.com
-- **Video demo (YouTube):** DRIVE: https://drive.google.com/file/d/1VOC5GfesNwed-VpUZWvgdijdne33kBvN/view?usp=sharing
+- **Video demo (YouTube):** DRIVE: [https://drive.google.com/file/d/1VOC5GfesNwed-VpUZWvgdijdne33kBvN/view?usp=sharing](https://drive.google.com/file/d/1VOC5GfesNwed-VpUZWvgdijdne33kBvN/view?usp=sharing)
 - **Contexto e impacto:** [`docs/contexto.md`](docs/contexto.md)
 - **Manual de despliegue:** [`docs/manual-despliegue.md`](docs/manual-despliegue.md)
 - **Contrato de datos:** [`docs/contrato-datos.md`](docs/contrato-datos.md)
