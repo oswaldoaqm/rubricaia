@@ -1,23 +1,3 @@
-"""
-RúbricaIA - Report Lambda (Fase 3B)
-===================================
-Disparador : EventBridge, regla JobCompleted del bus `rubricaia-events`.
-             (El Aggregator publica el evento cuando el lote termina.)
-Funcion    : arma el REPORTE DE CLASE de un job y lo deja descargable en S3 en
-             tres formatos (CSV, JSON, HTML), luego marca `report_ready` en META.
-
-Por que asi (arquitectura event-driven):
-  El reporte NO se calcula en el camino critico ni por polling: lo dispara el
-  evento de dominio "el lote termino". Es un consumidor independiente del bus
-  (el otro es SNS -> email al docente). Agregar/quitar consumidores no toca al
-  productor.
-
-Salida en S3 (mismo bucket de entrada, prefijo reports/):
-  reports/<jobId>/report.json   (maquina / reproducibilidad)
-  reports/<jobId>/report.csv    (el docente lo abre en Excel)
-  reports/<jobId>/report.html   (reporte visual autocontenido)
-"""
-
 import os
 import io
 import re
@@ -37,12 +17,10 @@ from boto3.dynamodb.conditions import Key
 TABLE_NAME = os.environ["TABLE_NAME"]
 BUCKET = os.environ["BUCKET"]
 
-# F2: resumen ejecutivo por LLM (reusa la integracion Groq; env compartida).
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
-# F4: umbral de similitud para marcar posible copia (coseno TF-IDF, 0..1).
 SIM_THRESHOLD = float(os.environ.get("SIM_THRESHOLD", "0.6"))
 
 s3 = boto3.client("s3")
@@ -189,7 +167,6 @@ def _to_html(rep):
         for c in rep["criterios_mas_fallados"][:8]
     ) or "<li class='muted'>Sin criterios fallados</li>"
 
-    # F2: bloque de resumen ejecutivo (si el LLM lo genero).
     resumen = rep.get("resumen_ejecutivo")
     if resumen and (resumen.get("resumen") or resumen.get("recomendaciones")):
         recs = "".join(f"<li>{e(r)}</li>" for r in resumen.get("recomendaciones", []))
@@ -200,7 +177,6 @@ def _to_html(rep):
     else:
         resumen_html = ""
 
-    # F4: bloque de posibles coincidencias (anti-copia).
     sim = rep.get("similitud", [])
     if sim:
         sim_items = "".join(
@@ -275,7 +251,7 @@ def _pct(part, whole):
     return round((part / whole) * 100) if whole else 0
 
 
-# --- F2: resumen ejecutivo de la clase por LLM -----------------------------
+# --- resumen ejecutivo de la clase por LLM -----------------------------
 def _llm_summary(rep):
     """Una llamada extra a Groq para narrar el desempeno de la clase y recomendar
     acciones. Es best-effort: si Groq falla, el reporte se genera igual sin esto."""
@@ -339,7 +315,7 @@ def _groq_chat(system_prompt, user_prompt):
         return json.loads(resp.read().decode("utf-8"))
 
 
-# --- F4: deteccion de similitud (TF-IDF + coseno, stdlib puro) -------------
+# --- Deteccion de similitud (TF-IDF + coseno, stdlib puro) -------------
 _STOP = set(
     "de la el en y a los las que un una para por con se su del al lo como mas este "
     "esta o e es son ser fue han ha hay le les nos sus pero si no sobre entre".split()
@@ -410,8 +386,8 @@ def handler(event, context):
         return {"ok": False, "error": "job vacio"}
 
     rep = _build_report(job_id, items)
-    rep["similitud"] = _find_similar(items)        # F4: pares sospechosos
-    rep["resumen_ejecutivo"] = _llm_summary(rep)   # F2: narrativa + recomendaciones
+    rep["similitud"] = _find_similar(items)
+    rep["resumen_ejecutivo"] = _llm_summary(rep)
     base = f"reports/{job_id}"
 
     s3.put_object(
@@ -423,7 +399,7 @@ def handler(event, context):
     s3.put_object(
         Bucket=BUCKET,
         Key=f"{base}/report.csv",
-        Body=_to_csv(rep).encode("utf-8-sig"),  # BOM para que Excel respete acentos
+        Body=_to_csv(rep).encode("utf-8-sig"),
         ContentType="text/csv; charset=utf-8",
     )
     s3.put_object(
@@ -433,8 +409,6 @@ def handler(event, context):
         ContentType="text/html; charset=utf-8",
     )
 
-    # Marca el reporte como listo y publica el nº de pares similares (F4) para que
-    # la API/Frontend ofrezcan la descarga y muestren la alerta de posible copia.
     table.update_item(
         Key={"PK": f"JOB#{job_id}", "SK": "META"},
         UpdateExpression=(

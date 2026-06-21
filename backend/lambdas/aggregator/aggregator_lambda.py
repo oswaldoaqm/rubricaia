@@ -1,30 +1,3 @@
-"""
-RúbricaIA - Aggregator Lambda
-=============================
-Disparador : DynamoDB Streams de la tabla rubricaia (NEW_AND_OLD_IMAGES).
-Funcion    : cada vez que un entregable (ITEM#) pasa a DONE, recalcula en
-             tiempo real las estadisticas de la clase (item STATS) y el ranking
-             de criterios mas fallados (items FAIL#<criterio>).
-
-Por que asi (arquitectura event-driven):
-  El dato que cambia DISPARA el agregado. No hay polling ni recalculo masivo:
-  cada transicion a DONE emite un evento de stream que actualiza los contadores
-  de forma incremental y atomica (ADD), idempotente respecto a duplicados.
-
-Items que mantiene (misma particion del job):
-  PK=JOB#<id> SK=STATS              -> done_count, failed_count, cumplimiento_sum,
-                                       dist_low/mid/high, completed (flag)
-  PK=JOB#<id> SK=FAIL#<criterio>    -> fail_count, criterio
-
-Fase 3B - cierre del ciclo por eventos:
-  Cuando (done + failed) alcanza el total del job, el Aggregator publica UNA sola
-  vez un evento "JobCompleted" en el bus de EventBridge (BUS_NAME). El bus hace
-  fan-out a SNS (email al docente) y a la Report Lambda (reporte de clase).
-  La emision unica se garantiza con una escritura condicional sobre STATS
-  (attribute_not_exists(completed)): aunque el stream reentregue, el evento sale
-  una sola vez.
-"""
-
 import os
 import json
 from datetime import datetime, timezone
@@ -111,7 +84,6 @@ def _update_stats(pk, cumplimiento, criterios):
 
 
 def _incr_failed(pk):
-    """Cuenta un entregable que termino en FAILED (para detectar el cierre del job)."""
     table.update_item(
         Key={"PK": pk, "SK": "STATS"},
         UpdateExpression="ADD failed_count :one",
@@ -120,11 +92,6 @@ def _incr_failed(pk):
 
 
 def _maybe_emit_completion(pk):
-    """
-    Si el lote completo (done + failed == total), publica UNA sola vez el evento
-    JobCompleted en EventBridge. La unicidad se garantiza con una escritura
-    condicional sobre STATS.completed (attribute_not_exists).
-    """
     meta = table.get_item(Key={"PK": pk, "SK": "META"}).get("Item") or {}
     total = int(meta.get("total", 0) or 0)
     if total <= 0:
@@ -155,7 +122,6 @@ def _maybe_emit_completion(pk):
 
 
 def _put_completed_event(job_id, total, done, failed, promedio):
-    """Publica el evento de dominio 'JobCompleted' en el bus de EventBridge."""
     if not BUS_NAME:
         print("BUS_NAME no configurado: se omite la emision de JobCompleted")
         return

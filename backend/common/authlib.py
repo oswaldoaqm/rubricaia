@@ -1,17 +1,3 @@
-"""
-RúbricaIA - authlib (modulo comun del plano de control)
-=======================================================
-JWT HS256 + hashing de contraseñas, TODO con stdlib (sin dependencias externas,
-coherente con el resto del proyecto). Lo comparten las Lambdas auth / lms / api.
-
-Se incluye en el paquete de cada funcion via 'package.patterns' en serverless.yml
-y se importa como:  from backend.common.authlib import jwt_encode, ...
-
-Variables de entorno:
-  JWT_SECRET   = secreto para firmar los tokens (obligatorio)
-  JWT_TTL      = segundos de validez del token (opcional, default 12h)
-"""
-
 import os
 import json
 import time
@@ -79,8 +65,6 @@ def verify_password(password: str, salt: str, expected_hex: str) -> bool:
 
 # --- extraer claims desde un evento de API Gateway -------------------------
 def auth_from_event(event):
-    """Devuelve los claims del JWT (dict) si el header Authorization es valido;
-    None en caso contrario. En HTTP API los headers llegan en minuscula."""
     headers = event.get("headers") or {}
     raw = headers.get("authorization") or headers.get("Authorization") or ""
     if not raw.lower().startswith("bearer "):

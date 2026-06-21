@@ -1,19 +1,3 @@
-"""
-RúbricaIA - API Lambda
-======================
-Disparador : API Gateway HTTP API (ruta $default, integracion AWS_PROXY).
-             Una sola Lambda enruta internamente por metodo + path.
-Funcion    : expone la API que consumira el frontend.
-
-Endpoints:
-  POST /uploads               -> genera presigned URL para subir el CSV a S3
-  GET  /jobs                  -> lista todos los jobs (item META)
-  GET  /jobs/{jobId}          -> estado + resultados de un job (progreso por entregable)
-  GET  /jobs/{jobId}/report   -> presigned URL de descarga del reporte (Fase 3B)
-                                 ?format=html|csv|json (default html)
-  POST /jobs/{jobId}/retry    -> re-encola los entregables en FAILED (F1)
-"""
-
 import os
 import sys
 import json
@@ -24,15 +8,15 @@ from decimal import Decimal
 import boto3
 from boto3.dynamodb.conditions import Key, Attr
 
-# authlib comun (para validar el JWT en las entregas ligadas a una tarea, F5).
+# authlib comun (para validar el JWT en las entregas ligadas a una tarea).
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "common"))
 from authlib import auth_from_event  # noqa: E402
 
 TABLE_NAME = os.environ["TABLE_NAME"]
 BUCKET = os.environ["BUCKET"]
 URL_EXPIRES = int(os.environ.get("URL_EXPIRES", "300"))
-QUEUE_URL = os.environ.get("QUEUE_URL", "")  # F1: re-encolar fallidos
-LMS_TABLE = os.environ.get("LMS_TABLE", "")  # F5: tabla del plano de control
+QUEUE_URL = os.environ.get("QUEUE_URL", "")
+LMS_TABLE = os.environ.get("LMS_TABLE", "")
 
 s3 = boto3.client("s3")
 sqs = boto3.client("sqs")
@@ -96,8 +80,6 @@ def create_upload(event):
     pesos = _parse_pesos(body.get("pesos"))  # ruta libre (sin tarea)
     scope = {}
 
-    # F5: si la entrega va ligada a una tarea, la rubrica y los pesos son los de la
-    # TAREA (fuente de verdad en el plano de control); el cliente no los decide.
     if class_id and task_id:
         claims = auth_from_event(event)
         if not claims:
@@ -146,8 +128,6 @@ def create_upload(event):
         meta["pesos"] = [Decimal(str(p)) for p in pesos]
     table.put_item(Item=meta)
 
-    # F5: puntero de entrega del alumno (para reabrir la tarea y ver su resultado).
-    # P2: índice por clase/tarea (para que el profesor liste las entregas sin scan).
     if scope:
         lms_table.put_item(
             Item={
@@ -169,7 +149,6 @@ def create_upload(event):
                 "submittedAt": now,
             }
         )
-        # G1: registro versionado por intento (no sobrescribe; ordena por timestamp).
         lms_table.put_item(
             Item={
                 "PK": f"USER#{scope['studentEmail']}",
@@ -281,17 +260,13 @@ def get_job(job_id):
         "counts": counts,
         "insights": insights,
         "results": results,
-        # Fase 3B: el evento JobCompleted disparo SNS (docente notificado) y la
-        # generacion del reporte. El frontend usa estos flags para el badge y la
-        # descarga.
         "completed": bool(stats.get("completed")) if stats else False,
         "reportReady": bool(meta.get("report_ready")) if meta else False,
-        # F4: nº de pares de entregables sospechosamente similares (anti-copia).
         "similarCount": int(meta.get("similar_count", 0) or 0) if meta else 0,
     })
 
 
-# --- POST /jobs/{jobId}/retry (F1) -----------------------------------------
+# --- POST /jobs/{jobId}/retry -----------------------------------------
 def retry_failed(job_id):
     """Re-encola los entregables en FAILED del job (redrive controlado) y reabre
     la compuerta de completion para que se regenere el reporte y la notificacion."""
@@ -344,7 +319,7 @@ def retry_failed(job_id):
     return _resp(200, {"requeued": requeued})
 
 
-# --- helpers de pesos (F5) -------------------------------------------------
+# --- helpers de pesos -------------------------------------------------
 def _parse_pesos(raw):
     """Acepta lista [30,20,...] o string '30,20,...'. Devuelve lista de numeros > 0 o None."""
     if raw is None:
@@ -366,7 +341,6 @@ def _parse_pesos(raw):
 
 
 def _plain_pesos(pesos):
-    """Convierte pesos (Decimals de DynamoDB) a numeros JSON-serializables."""
     if not pesos:
         return None
     out = []
@@ -381,7 +355,6 @@ def _plain_pesos(pesos):
 
 # --- GET /jobs/{jobId}/report ----------------------------------------------
 def get_report(event, job_id):
-    """Devuelve una presigned URL para descargar el reporte de clase (Fase 3B)."""
     qs = event.get("queryStringParameters") or {}
     fmt = (qs.get("format") or "html").lower()
     if fmt not in ("html", "csv", "json"):

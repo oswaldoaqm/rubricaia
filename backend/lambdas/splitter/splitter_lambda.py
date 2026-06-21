@@ -1,18 +1,3 @@
-"""
-RúbricaIA - Splitter Lambda
-===========================
-Disparador : S3 ObjectCreated en el bucket de entrada, prefijo `inputs/`.
-Funcion    : lee el CSV subido, crea el registro del JOB en DynamoDB y emite
-             UN mensaje SQS por cada fila (entregable). Aqui nace el
-             "procesamiento masivo por lotes de 20-30" de la rubrica.
-
-Flujo:
-  S3 (inputs/<jobId>/submissions.csv)  -> Splitter
-    -> DynamoDB: JOB#<jobId> / META   (status PROCESSING, total = nº filas)
-    -> DynamoDB: JOB#<jobId> / ITEM#<id>  (status PENDING)  por cada fila
-    -> SQS: un mensaje por fila
-"""
-
 import os
 import csv
 import io
@@ -44,10 +29,6 @@ def now_iso():
 
 
 def extract_job_id(key):
-    """
-    Espera key tipo 'inputs/<jobId>/submissions.csv'.
-    Si no calza ese patron, usa el nombre del archivo sin extension.
-    """
     parts = key.split("/")
     if len(parts) >= 3 and parts[0] == "inputs":
         return parts[1]
@@ -74,7 +55,6 @@ def handler(event, context):
             or DEFAULT_RUBRICA
         )
         created = existing.get("createdAt") or now_iso()
-        # F5: pesos por criterio (opcional) que el docente fijo en /uploads.
         pesos = _plain_pesos(existing.get("pesos"))
 
         reader = csv.DictReader(io.StringIO(text))
@@ -92,7 +72,6 @@ def handler(event, context):
         }
         if existing.get("pesos") is not None:
             meta_item["pesos"] = existing["pesos"]  # preservar (no perder los pesos)
-        # F5: preservar el vinculo de la entrega con su tarea/clase/alumno.
         for f in ("classId", "taskId", "studentEmail", "taskTitle"):
             if existing.get(f) is not None:
                 meta_item[f] = existing[f]
@@ -111,7 +90,6 @@ def handler(event, context):
                         "SK": f"ITEM#{sid}",
                         "status": "PENDING",
                         "id_estudiante": sid,
-                        # F1/F4: guardamos el texto en el item para poder reprocesar
                         # fallidos (re-encolar sin el CSV) y calcular similitud.
                         "texto": texto,
                         "createdAt": now_iso(),
@@ -128,7 +106,7 @@ def handler(event, context):
                                 "idEstudiante": sid,
                                 "texto": texto,
                                 "rubrica": rubrica,
-                                "pesos": pesos,  # F5: None si el docente no fijo pesos
+                                "pesos": pesos,
                             }
                         ),
                     }

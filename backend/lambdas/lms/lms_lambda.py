@@ -1,23 +1,3 @@
-"""
-RúbricaIA - LMS Lambda (plano de control multi-tenant)
-======================================================
-Disparador : API Gateway HTTP API. Rutas protegidas por JWT (header Authorization).
-Funcion    : gestion de clases (F2), membresias/invitaciones (F3) y tareas (F4).
-
-Esta fase (F2) implementa CLASES:
-  POST /classes          -> crear clase (solo profesor)
-  GET  /classes          -> listar mis clases (profesor: las que posee;
-                            estudiante: aquellas donde es miembro -> F3)
-  POST /classes/delete   -> eliminar clase (solo el profesor dueño; cascada)
-
-Modelo (tabla rubricaia-lms):
-  CLASS#<id>   / META                 -> {classId, name, ownerEmail, createdAt}
-  USER#<email> / OWNS#<id>            -> espejo: clases que posee el profesor
-  USER#<email> / MEMBERSHIP#<id>     -> espejo: clases del estudiante (F3)
-  CLASS#<id>   / MEMBER#<email>      -> roster (F3)
-  CLASS#<id>   / TASK#<taskId>       -> tareas (F4)
-"""
-
 import os
 import sys
 import json
@@ -32,7 +12,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "common"))
 from authlib import auth_from_event  # noqa: E402
 
 LMS_TABLE = os.environ["LMS_TABLE"]
-JOBS_TABLE = os.environ.get("TABLE_NAME", "")  # P2: leer resultados del pipeline
+JOBS_TABLE = os.environ.get("TABLE_NAME", "")
 ALLOWED_DOMAIN = os.environ.get("ALLOWED_DOMAIN", "utec.edu.pe").lower().lstrip("@")
 ddb = boto3.resource("dynamodb")
 table = ddb.Table(LMS_TABLE)
@@ -343,7 +323,6 @@ def get_detail(email, role, event):
         )
         if not me:
             return _resp(403, {"error": "No perteneces a esta clase"})
-        # F5: adjunta a cada tarea el jobId de la entrega del alumno (si ya entregó).
         subs = table.query(
             KeyConditionExpression=Key("PK").eq(f"USER#{email}")
             & Key("SK").begins_with("SUBMISSION#")
@@ -365,7 +344,7 @@ def get_detail(email, role, event):
     )
 
 
-# --- Tareas (F4) -----------------------------------------------------------
+# --- Tareas -----------------------------------------------------------
 def _to_decimal_list(raw):
     """Pesos -> lista de Decimal (acepta lista o string '30,20,...'). None si vacío/invalido."""
     if not raw:
@@ -461,7 +440,7 @@ def delete_task(email, role, event):
     return _resp(200, {"deleted": task_id})
 
 
-# --- GET /tasks/submissions?classId=&taskId= (P2: vista del profesor) -------
+# --- GET /tasks/submissions?classId=&taskId= -------
 def get_task_submissions(email, role, event):
     if role != "profesor":
         return _resp(403, {"error": "Solo el profesor ve las entregas"})
@@ -526,7 +505,7 @@ def get_task_submissions(email, role, event):
     return _resp(200, {"submissions": results, "stats": stats})
 
 
-# --- GET /tasks/attempts?taskId=... (G1: historial del propio alumno) -------
+# --- GET /tasks/attempts?taskId=...  -------
 def get_task_attempts(email, event):
     qs = event.get("queryStringParameters") or {}
     task_id = (qs.get("taskId") or "").strip()

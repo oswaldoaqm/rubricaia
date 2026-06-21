@@ -1,21 +1,3 @@
-"""
-RúbricaIA - Worker Lambda
-=========================
-Disparador : SQS (event source mapping) desde la cola principal `rubricaia-jobs`.
-Funcion    : por cada mensaje (un entregable) llama a Groq, parsea el JSON de
-             salida y guarda el resultado/estado en DynamoDB.
-
-Resiliencia (rúbrica criterio 3):
-  - Idempotencia: si el item ya está DONE, no se reprocesa.
-  - 429 / 5xx / JSON inválido  -> excepcion -> el mensaje se reporta como fallido
-    -> SQS lo reentrega tras el visibility timeout (reintento automatico).
-  - Tras `MAX_ATTEMPTS` recepciones, se marca FAILED y SQS lo manda a la DLQ.
-  - Se usa ReportBatchItemFailures: solo se reintenta el mensaje que falla,
-    no todo el lote.
-
-Sin dependencias externas: stdlib + boto3 (Groq se llama con urllib).
-"""
-
 import os
 import json
 import random
@@ -32,12 +14,10 @@ GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 MAX_ATTEMPTS = int(os.environ.get("MAX_ATTEMPTS", "3"))
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
-# F3: backoff adaptativo ante rate limit (segundos).
 QUEUE_URL = os.environ.get("QUEUE_URL", "")
 RETRY_BASE = float(os.environ.get("RETRY_BASE_SECONDS", "5"))
 RETRY_CAP = int(os.environ.get("RETRY_CAP_SECONDS", "300"))
 
-# G2: servicio RAG en OCI (multinube). Si RAG_URL está vacío, se evalúa sin RAG.
 RAG_URL = os.environ.get("RAG_URL", "").rstrip("/")
 RAG_TIMEOUT = float(os.environ.get("RAG_TIMEOUT", "5"))
 
@@ -58,7 +38,7 @@ def now_iso():
     return datetime.now(timezone.utc).isoformat()
 
 
-# --- G2: recuperacion de contexto desde el servicio RAG en OCI (multinube) -
+# --- Recuperacion de contexto desde el servicio RAG en OCI (multinube) -
 def _retrieve_context(texto):
     """Best-effort: si no hay RAG_URL o el servicio en OCI falla/responde lento,
     devuelve [] y la evaluacion sigue sin RAG (degradacion elegante)."""
@@ -98,7 +78,7 @@ def call_groq(texto, rubrica, contexts=None):
         '      "sugerencia": accion concreta para cumplirlo (cadena vacia si ya cumple).\n'
         "No incluyas explicaciones ni texto fuera del JSON."
     )
-    # G2: material del curso recuperado por RAG (si lo hay) para calibrar el juicio.
+    # material del curso recuperado por RAG (si lo hay) para calibrar el juicio.
     contexto_str = ""
     if contexts:
         contexto_str = (
@@ -244,14 +224,14 @@ def process_record(record):
     set_processing(pk, sk)
     contexts = _retrieve_context(msg["texto"])  # G2: RAG multinube (best-effort)
     result = call_groq(msg["texto"], msg["rubrica"], contexts)  # puede lanzar RetryableError
-    # F5: si el docente fijo pesos por criterio, el cumplimiento es ponderado.
+    # si el docente fijo pesos por criterio, el cumplimiento es ponderado.
     cump, metodo = _apply_weights(result["criterios"], result["cumplimiento"], msg.get("pesos"))
     result["cumplimiento"] = cump
     result["cumplimiento_metodo"] = metodo
     set_done(pk, sk, result)
 
 
-# --- F5: cumplimiento ponderado --------------------------------------------
+# --- cumplimiento ponderado --------------------------------------------
 def _apply_weights(criterios, llm_cumplimiento, pesos):
     """El cumplimiento se DERIVA de los criterios (consistente con las marcas
     cumple/no-cumple): ponderado si el docente fijo pesos, equitativo en caso
@@ -267,7 +247,7 @@ def _apply_weights(criterios, llm_cumplimiento, pesos):
     return int(llm_cumplimiento), "llm"
 
 
-# --- F3: backoff adaptativo ------------------------------------------------
+# --- backoff adaptativo ------------------------------------------------
 def _parse_retry_after(value):
     """Retry-After de Groq: aceptamos segundos; ignoramos el formato fecha HTTP."""
     if not value:
@@ -318,10 +298,7 @@ def handler(event, context):
                 sk = f"ITEM#{msg['idEstudiante']}"
                 set_attempt_status(pk, sk, recv_count, str(e))
             except Exception:
-                pass  # si ni el body se puede leer, igual reportamos el fallo abajo
-            # F3: si aun le quedan intentos (RETRYING), aplicamos backoff adaptativo
-            # con jitter (respeta Retry-After si Groq lo mando). En el ultimo intento
-            # no tiene sentido: el mensaje ira a la DLQ.
+                pass # si falla el update de status, no hacemos nada; el mensaje igual se reentrega.
             if recv_count < MAX_ATTEMPTS:
                 _delay_message(record, recv_count, getattr(e, "retry_after", None))
             # Reportar este mensaje como fallido => SQS lo reentrega (o lo manda a DLQ

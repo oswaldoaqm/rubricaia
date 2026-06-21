@@ -1,18 +1,3 @@
-"""
-RúbricaIA - Auth Lambda (plano de control, Fase multi-tenant F1)
-================================================================
-Disparador : API Gateway HTTP API (rutas POST /auth/signup, POST /auth/login).
-Funcion    : registro y login de usuarios. Emite un JWT con {email, role, name}.
-
-Reglas:
-  - Solo se aceptan correos del dominio institucional (ALLOWED_DOMAIN, ej. utec.edu.pe).
-  - El rol se decide por allowlist: si el correo esta en TEACHER_EMAILS -> 'profesor';
-    cualquier otro correo del dominio -> 'estudiante'. (Sin auto-elevacion.)
-  - Contraseñas con PBKDF2 (nunca en claro). Todo stdlib.
-
-Tabla LMS (rubricaia-lms): PK=USER#<email>  SK=PROFILE
-"""
-
 import os
 import sys
 import json
@@ -20,9 +5,6 @@ from datetime import datetime, timezone
 
 import boto3
 
-# authlib es un modulo comun (backend/common/authlib.py) que se empaqueta junto a
-# esta Lambda. Lo agregamos al path explicitamente para no depender de como el
-# runtime resuelva el handler anidado.
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "common"))
 from authlib import jwt_encode, hash_password, verify_password  # noqa: E402
 
@@ -116,8 +98,6 @@ def login(event):
     if not item or not verify_password(password, item.get("salt", ""), item.get("pw_hash", "")):
         return _resp(401, {"error": "Correo o contraseña incorrectos"})
 
-    # Re-evaluamos el rol contra la allowlist ACTUAL: así, si corriges TEACHER_EMAILS,
-    # basta volver a iniciar sesion para que el rol se actualice (sin recrear la cuenta).
     role = role_for(email)
     if role != item.get("role"):
         table.update_item(
